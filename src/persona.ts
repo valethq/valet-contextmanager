@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { Logger, Role } from "@valethq/sdk";
 import type { PersonaFile } from "./types";
 
-const DEFAULT_CAP = 65536;
+export const DEFAULT_CAP = 65536;
 const DAILY_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 const ROLE_RANK: Record<Role, number> = { guest: 0, trusted: 1, owner: 2 };
 const FILE_ROLES = new Set<PersonaFile["role"]>([
@@ -55,10 +55,13 @@ export async function defaultPersonaFiles(workspaceDir: string): Promise<Persona
   return files;
 }
 
-function personaSpec(settings: Record<string, unknown>): { files: PersonaEntry[] | null; cap: number } {
+function personaSpec(
+  settings: Record<string, unknown>,
+  defaultCap: number,
+): { files: PersonaEntry[] | null; cap: number } {
   const raw = settings.persona;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { files: null, cap: DEFAULT_CAP };
+    return { files: null, cap: defaultCap };
   }
   const p = raw as { files?: unknown; maxBytesPerFile?: unknown };
   const files = Array.isArray(p.files)
@@ -75,8 +78,7 @@ function personaSpec(settings: Record<string, unknown>): { files: PersonaEntry[]
         ];
       })
     : null;
-  const cap =
-    typeof p.maxBytesPerFile === "number" && p.maxBytesPerFile > 0 ? p.maxBytesPerFile : DEFAULT_CAP;
+  const cap = typeof p.maxBytesPerFile === "number" && p.maxBytesPerFile > 0 ? p.maxBytesPerFile : defaultCap;
   return { files, cap };
 }
 
@@ -85,8 +87,9 @@ export async function loadPersonaFiles(
   settings: Record<string, unknown>,
   role: Role,
   log: Logger,
+  defaultCap = DEFAULT_CAP,
 ): Promise<PersonaFile[]> {
-  const spec = personaSpec(settings);
+  const spec = personaSpec(settings, defaultCap);
   const files = spec.files ?? (await defaultPersonaFiles(workspaceDir));
   const { cap } = spec;
   const decoder = new TextDecoder();

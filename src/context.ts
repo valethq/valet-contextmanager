@@ -1,5 +1,6 @@
 import type { Message, ModelContent, ModelMessage, PluginContext, Role } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
+import { compactionThreshold, personaCap } from "./settings";
 import type { ContextManager, PersonaFile } from "./types";
 
 const AGENTS_RULE_NOTE =
@@ -41,7 +42,7 @@ export function createContextManager(ctx: PluginContext): ContextManager {
     if (!session) throw new Error(`valet-contextmanager: unknown session "${sessionId}"`);
     const project = ctx.store.projects.get(session.projectId);
     if (!project) throw new Error(`valet-contextmanager: unknown project "${session.projectId}"`);
-    return loadPersonaFiles(project.workspaceDir, project.settings, role, ctx.log);
+    return loadPersonaFiles(project.workspaceDir, project.settings, role, ctx.log, personaCap(ctx));
   }
 
   return {
@@ -64,7 +65,7 @@ export function createContextManager(ctx: PluginContext): ContextManager {
       }
       let total = system.length + chars.reduce((a, b) => a + b, 0);
       if (Number.isFinite(model.contextWindow) && model.contextWindow > 0) {
-        while (messages.length > 0 && Math.ceil(total / 4) > 0.8 * model.contextWindow) {
+        while (messages.length > 0 && Math.ceil(total / 4) > compactionThreshold(ctx) * model.contextWindow) {
           messages.shift();
           total -= chars.shift() ?? 0;
         }
@@ -74,7 +75,10 @@ export function createContextManager(ctx: PluginContext): ContextManager {
 
     async shouldCompact({ model, lastUsage }) {
       if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0) return false;
-      return (lastUsage.contextTokens ?? lastUsage.inputTokens ?? 0) > 0.8 * model.contextWindow;
+      return (
+        (lastUsage.contextTokens ?? lastUsage.inputTokens ?? 0) >
+        compactionThreshold(ctx) * model.contextWindow
+      );
     },
 
     async compact() {

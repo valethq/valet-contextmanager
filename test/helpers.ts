@@ -117,6 +117,7 @@ export interface Booted {
   warns: { msg: string; data?: Record<string, unknown> }[];
   defined: ScopeDefinition[];
   provided: { scope: string; impl: unknown; key?: string }[];
+  kv: Map<string, unknown>;
 }
 
 export function boot(
@@ -131,6 +132,7 @@ export function boot(
   const provided: Booted["provided"] = [];
   const sessions = new Map((o.sessions ?? []).map((s) => [s.id, s]));
   const projects = new Map((o.projects ?? []).map((p) => [p.id, p]));
+  const kv = new Map<string, unknown>();
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
     config: {},
@@ -158,10 +160,18 @@ export function boot(
       projects: { get: (id: string) => projects.get(id) },
       messages: { list: (sessionId: string) => o.messages?.[sessionId] ?? [] },
     },
+    storage: {
+      kv: {
+        get: <T>(k: string) => kv.get(k) as T | undefined,
+        set: (k: string, v: unknown) => void kv.set(k, v),
+        delete: (k: string) => void kv.delete(k),
+        list: () => [...kv.keys()],
+      },
+    },
     signal: new AbortController().signal,
     onDispose() {},
   } as unknown as PluginContext;
   plugin.activate(ctx);
   const impl = provided[0]?.impl as ContextManager;
-  return { impl, warns, defined, provided };
+  return { impl, warns, defined, provided, kv };
 }
