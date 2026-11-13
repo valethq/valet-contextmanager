@@ -13,11 +13,6 @@ export interface BuiltContext {
   files: PersonaFile[];
 }
 
-/** Who compacts: valet summarizes with a model it is given, or a harness compacted itself and valet only marks it. */
-export type CompactionBy =
-  | { kind: "valet"; summarize(transcript: string): Promise<string> }
-  | { kind: "harness"; label: string };
-
 export interface ContextManager {
   /** model-kind: full prompt within budget (persona files, compaction summary, recent history). */
   build(req: { sessionId: string; runId: string; model: ModelInfo; role: Role }): Promise<BuiltContext>;
@@ -32,12 +27,25 @@ export interface ContextManager {
     model: ModelInfo;
     lastUsage: { inputTokens?: number; contextTokens?: number };
   }): Promise<boolean>;
+  /** Opens a compaction part in the chat (status in_progress), in the same session, never a new one. */
+  compactionStart(req: { sessionId: string; by: string }): Promise<{ compactionId: string }>;
+  /** Closes the compaction part that compactionStart opened. A summary only counts when completed. */
+  compactionEnd(req: {
+    sessionId: string;
+    compactionId: string;
+    status: "completed" | "failed" | "cancelled";
+    summary?: string;
+    error?: string;
+  }): Promise<void>;
   /**
-   * Records a `compaction` part in the same chat (never a new session). `by: valet` summarizes the
-   * chat since the last valet summary and the summary replaces it in history; `by: harness` writes
-   * a marker only and leaves valet's history untouched.
+   * valet compacts the chat: opens a part, summarizes everything since the last valet summary with
+   * `summarize`, then closes the part. The summary replaces older turns in valet's history.
    */
-  compact(req: { sessionId: string; reason: "auto" | "manual"; by: CompactionBy }): Promise<void>;
+  compact(req: {
+    sessionId: string;
+    reason: "auto" | "manual";
+    summarize(transcript: string): Promise<string>;
+  }): Promise<void>;
 }
 
 declare module "@valethq/sdk" {

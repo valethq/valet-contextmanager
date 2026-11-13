@@ -110,16 +110,10 @@ describe("compact", () => {
     });
     return { impl, store, model: model(1_000_000) };
   }
-  const valet = (summary: string, seen: string[] = []) => ({
-    kind: "valet" as const,
-    summarize: async (t: string) => {
-      seen.push(t);
-      return summary;
-    },
-  });
   const prompt = (sessionId: string) => ({ sessionId, runId: "r9", role: "owner" as const });
+  const lastData = (store: { s1: ReturnType<typeof entry>[] }) => store.s1.at(-1)?.parts[0]?.data;
 
-  test("valet summarizes the chat in place, and history starts from the summary", async () => {
+  test("valet summarizes the chat in place, and history starts from the completed summary", async () => {
     const {
       impl,
       store,
@@ -129,12 +123,20 @@ describe("compact", () => {
       entry("s1", "assistant", [text("old answer")], { runId: "r1" }),
     ]);
     const seen: string[] = [];
-    await impl.compact({ sessionId: "s1", reason: "manual", by: valet("SUMMARY", seen) });
+    await impl.compact({
+      sessionId: "s1",
+      reason: "manual",
+      summarize: async (t) => {
+        seen.push(t);
+        return "SUMMARY";
+      },
+    });
     expect(seen).toEqual(["user: old question\n\nassistant: old answer"]);
     const last = store.s1[1]?.message.seq ?? -1;
-    expect(store.s1.at(-1)?.parts[0]?.data).toEqual({
+    expect(lastData(store)).toEqual({
       type: "compaction",
       by: "valet",
+      status: "completed",
       coversThroughSeq: last,
       summary: "SUMMARY",
     });
@@ -156,30 +158,60 @@ describe("compact", () => {
 
   test("a second valet compaction folds the earlier summary into the new one", async () => {
     const { impl, store } = await setup([entry("s1", "user", [text("first")])]);
-    await impl.compact({ sessionId: "s1", reason: "manual", by: valet("ONE") });
+    await impl.compact({ sessionId: "s1", reason: "manual", summarize: async () => "ONE" });
     store.s1.push(entry("s1", "assistant", [text("second")], { runId: "r2" }));
     const seen: string[] = [];
-    await impl.compact({ sessionId: "s1", reason: "auto", by: valet("TWO", seen) });
+    await impl.compact({
+      sessionId: "s1",
+      reason: "auto",
+      summarize: async (t) => {
+        seen.push(t);
+        return "TWO";
+      },
+    });
     expect(seen).toEqual(["Earlier summary:\nONE\n\nassistant: second"]);
   });
 
-  test("a harness marker is recorded but leaves valet's history untouched", async () => {
+  test("start opens an in-progress part and end closes it without touching history unless completed", async () => {
     const { impl, store, model: m } = await setup([entry("s1", "user", [text("hello")])]);
     const covers = store.s1[0]?.message.seq ?? -1;
-    await impl.compact({ sessionId: "s1", reason: "auto", by: { kind: "harness", label: "Claude Code" } });
-    expect(store.s1.at(-1)?.parts[0]?.data).toEqual({
+    const { compactionId } = await impl.compactionStart({ sessionId: "s1", by: "Claude Code" });
+    expect(lastData(store)).toMatchObject({
+      by: "Claude Code",
+      status: "in_progress",
+      coversThroughSeq: covers,
+    });
+    await impl.compactionEnd({ sessionId: "s1", compactionId, status: "completed" });
+    expect(lastData(store)).toEqual({
       type: "compaction",
       by: "Claude Code",
+      status: "completed",
       coversThroughSeq: covers,
     });
     const built = await impl.build({ ...prompt("s1"), model: m });
     expect(built.messages).toEqual([{ role: "user", content: [{ type: "text", text: "hello" }] }]);
   });
 
+  test("a failed valet summary records the error and leaves history alone", async () => {
+    const { impl, store, model: m } = await setup([entry("s1", "user", [text("hello")])]);
+    await expect(
+      impl.compact({
+        sessionId: "s1",
+        reason: "auto",
+        summarize: async () => {
+          throw new Error("provider down");
+        },
+      }),
+    ).rejects.toThrow("provider down");
+    expect(lastData(store)).toMatchObject({ status: "failed", error: "provider down" });
+    const built = await impl.build({ ...prompt("s1"), model: m });
+    expect(built.messages).toEqual([{ role: "user", content: [{ type: "text", text: "hello" }] }]);
+  });
+
   test("valet refuses an empty chat", async () => {
     const { impl } = await setup([]);
-    await expect(impl.compact({ sessionId: "s1", reason: "manual", by: valet("x") })).rejects.toThrow(
-      "nothing to compact yet",
-    );
+    await expect(
+      impl.compact({ sessionId: "s1", reason: "manual", summarize: async () => "x" }),
+    ).rejects.toThrow("nothing to compact yet");
   });
 });

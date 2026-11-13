@@ -164,8 +164,36 @@ export function boot(
         create: async (input: { sessionId: string; role: Message["role"]; parts: PartData[] }) => {
           const e = entry(input.sessionId, input.role, input.parts);
           messages[input.sessionId] = [...(messages[input.sessionId] ?? []), e];
-          return e.message;
+          return { message: e.message, parts: e.parts };
         },
+        openPart: (messageId: string, data: PartData) => {
+          const owner = Object.values(messages)
+            .flat()
+            .find((e) => e.message.id === messageId);
+          const part: Part = {
+            id: `${messageId}p${owner?.parts.length ?? 0}`,
+            messageId,
+            idx: owner?.parts.length ?? 0,
+            status: "streaming",
+            type: data.type,
+            data,
+            createdAt: 0,
+            updatedAt: 0,
+          };
+          owner?.parts.push(part);
+          return {
+            partId: part.id,
+            append() {},
+            replace(next: PartData) {
+              part.data = next;
+            },
+            close(status: "complete" | "error" | "interrupted", final?: PartData) {
+              if (final) part.data = final;
+              part.status = status === "complete" ? "complete" : "error";
+            },
+          };
+        },
+        complete: async () => {},
       },
     },
     storage: {

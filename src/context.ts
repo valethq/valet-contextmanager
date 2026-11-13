@@ -1,4 +1,13 @@
-import type { Message, ModelContent, ModelMessage, Part, PluginContext, Role } from "@valethq/sdk";
+import type {
+  Message,
+  ModelContent,
+  ModelMessage,
+  Part,
+  PartData,
+  PartWriter,
+  PluginContext,
+  Role,
+} from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
 import { compactionThreshold, personaCap } from "./settings";
 import type { ContextManager, PersonaFile } from "./types";
@@ -47,14 +56,21 @@ interface Summary {
   coversThroughSeq: number;
 }
 
-/** The latest valet summary; harness markers carry no summary and never replace history. */
+/** The latest completed valet summary; harness markers and failed or open compactions never replace history. */
 function latestSummary(entries: Entry[]): Summary | undefined {
   let found: Summary | undefined;
   for (const { parts } of entries)
     for (const { data } of parts)
-      if (data.type === "compaction" && data.summary !== undefined)
+      if (data.type === "compaction" && data.status === "completed" && data.summary !== undefined)
         found = { summary: data.summary, coversThroughSeq: data.coversThroughSeq };
   return found;
+}
+
+interface OpenCompaction {
+  writer: PartWriter;
+  messageId: string;
+  by: string;
+  coversThroughSeq: number;
 }
 
 /** Text of every message after `since` (seq), prefixed by the prior summary so the new one folds it in. */
@@ -70,6 +86,52 @@ function transcript(entries: Entry[], since: Summary | undefined): string {
 }
 
 export function createContextManager(ctx: PluginContext): ContextManager {
+  const open = new Map<string, OpenCompaction>();
+
+  async function start(sessionId: string, by: string): Promise<string> {
+    const entries = ctx.store.messages.list(sessionId);
+    const coversThroughSeq = entries.at(-1)?.message.seq ?? 0;
+    const res = await ctx.store.messages.create({
+      sessionId,
+      role: "system",
+      origin: { platform: "system", conversationId: sessionId },
+      status: "streaming",
+      parts: [],
+    });
+    if ("cancelled" in res) throw new Error(res.cancelReason ?? "compaction was cancelled");
+    const messageId = res.message.id;
+    const writer = ctx.store.messages.openPart(messageId, {
+      type: "compaction",
+      by,
+      status: "in_progress",
+      coversThroughSeq,
+    });
+    open.set(writer.partId, { writer, messageId, by, coversThroughSeq });
+    return writer.partId;
+  }
+
+  async function end(
+    compactionId: string,
+    result: { status: "completed" | "failed" | "cancelled"; summary?: string; error?: string },
+  ): Promise<void> {
+    const o = open.get(compactionId);
+    if (!o) throw new Error(`valet-contextmanager: no open compaction "${compactionId}"`);
+    open.delete(compactionId);
+    const data: PartData = {
+      type: "compaction",
+      by: o.by,
+      status: result.status,
+      coversThroughSeq: o.coversThroughSeq,
+      ...(result.status === "completed" && result.summary !== undefined ? { summary: result.summary } : {}),
+      ...(result.error === undefined ? {} : { error: result.error }),
+    };
+    o.writer.close(
+      result.status === "completed" ? "complete" : result.status === "failed" ? "error" : "interrupted",
+      data,
+    );
+    await ctx.store.messages.complete(o.messageId, "complete");
+  }
+
   async function loadFiles(sessionId: string, role: Role): Promise<PersonaFile[]> {
     const session = ctx.store.sessions.get(sessionId);
     if (!session) throw new Error(`valet-contextmanager: unknown session "${sessionId}"`);
@@ -122,30 +184,27 @@ export function createContextManager(ctx: PluginContext): ContextManager {
       );
     },
 
-    async compact({ sessionId, by }) {
+    async compactionStart({ sessionId, by }) {
+      return { compactionId: await start(sessionId, by) };
+    },
+
+    async compactionEnd({ compactionId, status, summary, error }) {
+      await end(compactionId, { status, summary, error });
+    },
+
+    async compact({ sessionId, summarize }) {
       const entries = ctx.store.messages.list(sessionId);
-      const cut = latestSummary(entries);
-      let summary: string | undefined;
-      if (by.kind === "valet") {
-        const text = transcript(entries, cut);
-        if (text === "") throw new Error("nothing to compact yet");
-        summary = await by.summarize(text);
+      const text = transcript(entries, latestSummary(entries));
+      if (text === "") throw new Error("nothing to compact yet");
+      const compactionId = await start(sessionId, "valet");
+      try {
+        const summary = await summarize(text);
+        await end(compactionId, { status: "completed", summary });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await end(compactionId, { status: "failed", error: message });
+        throw error;
       }
-      const coversThroughSeq = entries.at(-1)?.message.seq ?? 0;
-      const res = await ctx.store.messages.create({
-        sessionId,
-        role: "system",
-        origin: { platform: "system", conversationId: sessionId },
-        parts: [
-          {
-            type: "compaction",
-            by: by.kind === "valet" ? "valet" : by.label,
-            coversThroughSeq,
-            ...(summary === undefined ? {} : { summary }),
-          },
-        ],
-      });
-      if ("cancelled" in res) throw new Error(res.cancelReason ?? "compaction was cancelled");
     },
   };
 }
