@@ -1,11 +1,22 @@
-import type { Message, ModelContent, ModelInfo, ModelMessage, PluginContext, Role } from "@valethq/sdk";
+import type { Message, ModelContent, ModelMessage, PluginContext, Role } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
 import type { ContextManager, PersonaFile } from "./types";
 
-function renderPreamble(files: PersonaFile[], model?: ModelInfo): string {
-  const sections = ["# Persona", ...files.map((f) => `## ${f.path}\n\n${f.content}`)];
-  if (model && Number.isFinite(model.contextWindow) && model.contextWindow > 0) {
-    sections.push(`Context window: ${model.contextWindow} tokens (model ${model.id}).`);
+const AGENTS_RULE_NOTE =
+  "(Devin CLI also loads this file as an always-on rule cut at 16 KB; this full copy supersedes it.)";
+
+function renderPreamble(files: PersonaFile[], model?: { id: string; contextWindow?: number }): string {
+  const sections = [
+    "# Persona",
+    ...files.map((f) =>
+      f.path === "AGENTS.md"
+        ? `## ${f.path}\n\n${AGENTS_RULE_NOTE}\n\n${f.content}`
+        : `## ${f.path}\n\n${f.content}`,
+    ),
+  ];
+  const cw = model?.contextWindow;
+  if (model && typeof cw === "number" && Number.isFinite(cw) && cw > 0) {
+    sections.push(`Context window: ${cw} tokens (model ${model.id}).`);
   }
   return sections.join("\n\n");
 }
@@ -34,8 +45,8 @@ export function createContextManager(ctx: PluginContext): ContextManager {
   }
 
   return {
-    async preamble({ sessionId, role }) {
-      return renderPreamble(await loadFiles(sessionId, role));
+    async preamble({ sessionId, role, model }) {
+      return renderPreamble(await loadFiles(sessionId, role), model);
     },
 
     async build({ sessionId, runId, model, role }) {

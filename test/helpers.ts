@@ -109,6 +109,9 @@ export function entry(
 
 export const text = (t: string): PartData => ({ type: "text", text: t });
 
+export const AGENTS_RULE_NOTE =
+  "(Devin CLI also loads this file as an always-on rule cut at 16 KB; this full copy supersedes it.)";
+
 export interface Booted {
   impl: ContextManager;
   warns: { msg: string; data?: Record<string, unknown> }[];

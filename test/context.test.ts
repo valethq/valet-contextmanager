@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { boot, cleanup, entry, model, project, session, text, workspace } from "./helpers";
+import { AGENTS_RULE_NOTE, boot, cleanup, entry, model, project, session, text, workspace } from "./helpers";
 
 afterAll(cleanup);
 
@@ -29,7 +29,7 @@ describe("build", () => {
     ]);
     const built = await impl.build({ sessionId: "s1", runId: "r2", model: m, role: "owner" });
     expect(built.system).toBe(
-      "# Persona\n\n## AGENTS.md\n\nag\n\nContext window: 1000000 tokens (model test-model).",
+      `# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\nag\n\nContext window: 1000000 tokens (model test-model).`,
     );
     expect(built.messages).toEqual([
       { role: "user", content: [{ type: "text", text: "hello" }] },
@@ -52,20 +52,20 @@ describe("build", () => {
         entry("s1", "user", [text(long)]),
         entry("s1", "assistant", [text(long)]),
       ],
-      100,
+      140,
     );
     const built = await impl.build({ sessionId: "s1", runId: "r9", model: m, role: "owner" });
-    // budget: 80 tokens = 320 chars; system is 23 chars -> ~2 messages fit
+    // budget: 112 tokens = 448 chars; system ~174 chars -> ~2 messages fit
     expect(built.messages).toHaveLength(2);
-    expect(Math.ceil((built.system.length + 200) / 4)).toBeLessThanOrEqual(80);
-    expect(built.estimatedTokens).toBeLessThanOrEqual(80);
+    expect(Math.ceil((built.system.length + 200) / 4)).toBeLessThanOrEqual(112);
+    expect(built.estimatedTokens).toBeLessThanOrEqual(112);
     expect(built.messages[0]?.role).toBe("user");
   });
 
   test("omits the context-window line when the window is unknown", async () => {
     const { impl } = await bootBuild([]);
     const built = await impl.build({ sessionId: "s1", runId: "r1", model: model(0), role: "owner" });
-    expect(built.system).toBe("# Persona\n\n## AGENTS.md\n\nag");
+    expect(built.system).toBe(`# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\nag`);
   });
 
   test("empty history yields no messages", async () => {

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { boot, cleanup, dayKey, project, session, workspace } from "./helpers";
+import { AGENTS_RULE_NOTE, boot, cleanup, dayKey, project, session, workspace } from "./helpers";
 
 afterAll(cleanup);
 
@@ -39,7 +39,7 @@ describe("preamble", () => {
     const dir = await workspace(allFiles());
     const { impl } = await bootWith(dir);
     const out = await impl.preamble({ sessionId: "s1", role: "owner" });
-    expect(out.startsWith("# Persona\n\n## AGENTS.md\n\nagents content")).toBe(true);
+    expect(out.startsWith(`# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\nagents content`)).toBe(true);
     const order = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md", "memory/"];
     let at = 0;
     for (const h of order) {
@@ -100,17 +100,58 @@ describe("preamble", () => {
     const dir = await workspace({ "AGENTS.md": content });
     const { impl, warns } = await bootWith(dir);
     const out = await impl.preamble({ sessionId: "s1", role: "owner" });
-    expect(out).toBe(`# Persona\n\n## AGENTS.md\n\n${content}`);
+    expect(out).toBe(`# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\n${content}`);
     expect(out.endsWith(lastLine)).toBe(true);
     expect(out).not.toContain("[valet: truncated");
     expect(warns).toHaveLength(0);
   });
 
-  test("preamble has no model, so no context-window line", async () => {
+  test("rule note sits directly under the AGENTS.md heading, only there", async () => {
+    const dir = await workspace(allFiles());
+    const { impl } = await bootWith(dir);
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toContain(`## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\nagents content`);
+    expect(out.indexOf(AGENTS_RULE_NOTE)).toBe(out.lastIndexOf(AGENTS_RULE_NOTE));
+    const soul = out.indexOf("## SOUL.md");
+    expect(out.slice(soul, soul + 300)).not.toContain(AGENTS_RULE_NOTE);
+  });
+
+  test("preamble without model prints no context-window line", async () => {
     const dir = await workspace({ "AGENTS.md": "ag" });
     const { impl } = await bootWith(dir);
     const out = await impl.preamble({ sessionId: "s1", role: "owner" });
     expect(out).not.toContain("Context window:");
+  });
+
+  test("preamble with model ends with the same context-window line build() uses", async () => {
+    const dir = await workspace({ "AGENTS.md": "ag" });
+    const { impl } = await bootWith(dir);
+    const out = await impl.preamble({
+      sessionId: "s1",
+      role: "owner",
+      model: { id: "test-model", contextWindow: 1_000_000 },
+    });
+    expect(out.endsWith("Context window: 1000000 tokens (model test-model).")).toBe(true);
+    expect(out).toBe(
+      `# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\nag\n\nContext window: 1000000 tokens (model test-model).`,
+    );
+  });
+
+  test("preamble omits the context-window line for zero/unknown window", async () => {
+    const dir = await workspace({ "AGENTS.md": "ag" });
+    const { impl } = await bootWith(dir);
+    const zero = await impl.preamble({
+      sessionId: "s1",
+      role: "owner",
+      model: { id: "test-model", contextWindow: 0 },
+    });
+    expect(zero).not.toContain("Context window:");
+    const unknown = await impl.preamble({
+      sessionId: "s1",
+      role: "owner",
+      model: { id: "test-model" },
+    });
+    expect(unknown).not.toContain("Context window:");
   });
 
   test("missing files are skipped silently", async () => {
@@ -126,7 +167,7 @@ describe("preamble", () => {
     const { impl, warns } = await bootWith(dir, { persona: { maxBytesPerFile: 10 } });
     const out = await impl.preamble({ sessionId: "s1", role: "owner" });
     expect(out).toBe(
-      `# Persona\n\n## AGENTS.md\n\n${"x".repeat(10)}\n\n[valet: truncated 10 bytes over the per-file cap]`,
+      `# Persona\n\n## AGENTS.md\n\n${AGENTS_RULE_NOTE}\n\n${"x".repeat(10)}\n\n[valet: truncated 10 bytes over the per-file cap]`,
     );
     expect(warns).toHaveLength(1);
     expect(warns[0]?.data?.path).toBe("AGENTS.md");

@@ -17,7 +17,11 @@ export interface ContextManager {
   /** model-kind: full prompt within budget (persona files, compaction summary, recent history). */
   build(req: { sessionId: string; runId: string; model: ModelInfo; role: Role }): Promise<BuiltContext>;
   /** agent-kind: persona/memory preamble for a new or reseeded remote session. */
-  preamble(req: { sessionId: string; role: Role }): Promise<string>;
+  preamble(req: {
+    sessionId: string;
+    role: Role;
+    model?: { id: string; contextWindow?: number };
+  }): Promise<string>;
   shouldCompact(req: {
     sessionId: string;
     model: ModelInfo;
