@@ -133,6 +133,7 @@ export function boot(
   const sessions = new Map((o.sessions ?? []).map((s) => [s.id, s]));
   const projects = new Map((o.projects ?? []).map((p) => [p.id, p]));
   const kv = new Map<string, unknown>();
+  const messages = o.messages ?? {};
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
     config: {},
@@ -158,7 +159,14 @@ export function boot(
     store: {
       sessions: { get: (id: string) => sessions.get(id) },
       projects: { get: (id: string) => projects.get(id) },
-      messages: { list: (sessionId: string) => o.messages?.[sessionId] ?? [] },
+      messages: {
+        list: (sessionId: string) => messages[sessionId] ?? [],
+        create: async (input: { sessionId: string; role: Message["role"]; parts: PartData[] }) => {
+          const e = entry(input.sessionId, input.role, input.parts);
+          messages[input.sessionId] = [...(messages[input.sessionId] ?? []), e];
+          return e.message;
+        },
+      },
     },
     storage: {
       kv: {

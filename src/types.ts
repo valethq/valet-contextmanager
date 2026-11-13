@@ -13,6 +13,11 @@ export interface BuiltContext {
   files: PersonaFile[];
 }
 
+/** Who compacts: valet summarizes with a model it is given, or a harness compacted itself and valet only marks it. */
+export type CompactionBy =
+  | { kind: "valet"; summarize(transcript: string): Promise<string> }
+  | { kind: "harness"; label: string };
+
 export interface ContextManager {
   /** model-kind: full prompt within budget (persona files, compaction summary, recent history). */
   build(req: { sessionId: string; runId: string; model: ModelInfo; role: Role }): Promise<BuiltContext>;
@@ -27,11 +32,12 @@ export interface ContextManager {
     model: ModelInfo;
     lastUsage: { inputTokens?: number; contextTokens?: number };
   }): Promise<boolean>;
-  /** Writes a compaction-summary part. Older messages stay stored but leave the prompt window. */
-  compact(req: {
-    sessionId: string;
-    reason: "auto" | "manual" | "resume";
-  }): Promise<{ summaryPartId: string }>;
+  /**
+   * Records a `compaction` part in the same chat (never a new session). `by: valet` summarizes the
+   * chat since the last valet summary and the summary replaces it in history; `by: harness` writes
+   * a marker only and leaves valet's history untouched.
+   */
+  compact(req: { sessionId: string; reason: "auto" | "manual"; by: CompactionBy }): Promise<void>;
 }
 
 declare module "@valethq/sdk" {

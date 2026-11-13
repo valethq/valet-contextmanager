@@ -1,4 +1,4 @@
-import type { Message, ModelContent, ModelMessage, PluginContext, Role } from "@valethq/sdk";
+import type { Message, ModelContent, ModelMessage, Part, PluginContext, Role } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
 import { compactionThreshold, personaCap } from "./settings";
 import type { ContextManager, PersonaFile } from "./types";
@@ -36,6 +36,39 @@ function toModelMessage(message: Message, content: ModelContent[]): ModelMessage
   }
 }
 
+const SUMMARY_HEAD = "[valet: summary of the earlier part of this chat, compacted by valet]";
+
+interface Entry {
+  message: Message;
+  parts: Part[];
+}
+interface Summary {
+  summary: string;
+  coversThroughSeq: number;
+}
+
+/** The latest valet summary; harness markers carry no summary and never replace history. */
+function latestSummary(entries: Entry[]): Summary | undefined {
+  let found: Summary | undefined;
+  for (const { parts } of entries)
+    for (const { data } of parts)
+      if (data.type === "compaction" && data.summary !== undefined)
+        found = { summary: data.summary, coversThroughSeq: data.coversThroughSeq };
+  return found;
+}
+
+/** Text of every message after `since` (seq), prefixed by the prior summary so the new one folds it in. */
+function transcript(entries: Entry[], since: Summary | undefined): string {
+  const lines: string[] = [];
+  for (const { message, parts } of entries) {
+    if (since !== undefined && message.seq <= since.coversThroughSeq) continue;
+    const texts = parts.flatMap((p) => (p.data.type === "text" ? [p.data.text] : []));
+    if (texts.length > 0) lines.push(`${message.role}: ${texts.join("\n")}`);
+  }
+  const prior = since === undefined ? [] : [`Earlier summary:\n${since.summary}`];
+  return [...prior, ...lines].join("\n\n");
+}
+
 export function createContextManager(ctx: PluginContext): ContextManager {
   async function loadFiles(sessionId: string, role: Role): Promise<PersonaFile[]> {
     const session = ctx.store.sessions.get(sessionId);
@@ -53,10 +86,18 @@ export function createContextManager(ctx: PluginContext): ContextManager {
     async build({ sessionId, runId, model, role }) {
       const files = await loadFiles(sessionId, role);
       const system = renderPreamble(files, model);
+      const entries = ctx.store.messages.list(sessionId);
+      const cut = latestSummary(entries);
       const messages: ModelMessage[] = [];
       const chars: number[] = [];
-      for (const { message, parts } of ctx.store.messages.list(sessionId)) {
+      if (cut) {
+        const text = `${SUMMARY_HEAD}\n${cut.summary}`;
+        messages.push({ role: "user", content: [{ type: "text", text }] });
+        chars.push(text.length);
+      }
+      for (const { message, parts } of entries) {
         if (message.role === "assistant" && message.runId === runId) continue;
+        if (cut && message.seq <= cut.coversThroughSeq) continue;
         const texts = parts.flatMap((p) => (p.data.type === "text" ? [p.data.text] : []));
         if (texts.length === 0) continue;
         const content: ModelContent[] = texts.map((t) => ({ type: "text", text: t }));
@@ -81,8 +122,30 @@ export function createContextManager(ctx: PluginContext): ContextManager {
       );
     },
 
-    async compact() {
-      throw new Error("valet-contextmanager: compaction lands in M3");
+    async compact({ sessionId, by }) {
+      const entries = ctx.store.messages.list(sessionId);
+      const cut = latestSummary(entries);
+      let summary: string | undefined;
+      if (by.kind === "valet") {
+        const text = transcript(entries, cut);
+        if (text === "") throw new Error("nothing to compact yet");
+        summary = await by.summarize(text);
+      }
+      const coversThroughSeq = entries.at(-1)?.message.seq ?? 0;
+      const res = await ctx.store.messages.create({
+        sessionId,
+        role: "system",
+        origin: { platform: "system", conversationId: sessionId },
+        parts: [
+          {
+            type: "compaction",
+            by: by.kind === "valet" ? "valet" : by.label,
+            coversThroughSeq,
+            ...(summary === undefined ? {} : { summary }),
+          },
+        ],
+      });
+      if ("cancelled" in res) throw new Error(res.cancelReason ?? "compaction was cancelled");
     },
   };
 }

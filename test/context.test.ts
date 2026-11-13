@@ -100,10 +100,86 @@ describe("shouldCompact", () => {
 });
 
 describe("compact", () => {
-  test("throws until M3", async () => {
-    const { impl } = boot();
-    await expect(impl.compact({ sessionId: "s1", reason: "auto" })).rejects.toThrow(
-      "valet-contextmanager: compaction lands in M3",
+  async function setup(messages: ReturnType<typeof entry>[]) {
+    const dir = await workspace({ "AGENTS.md": "ag" });
+    const store = { s1: messages };
+    const { impl } = boot({
+      sessions: [session("s1", "p1")],
+      projects: [project("p1", dir)],
+      messages: store,
+    });
+    return { impl, store, model: model(1_000_000) };
+  }
+  const valet = (summary: string, seen: string[] = []) => ({
+    kind: "valet" as const,
+    summarize: async (t: string) => {
+      seen.push(t);
+      return summary;
+    },
+  });
+  const prompt = (sessionId: string) => ({ sessionId, runId: "r9", role: "owner" as const });
+
+  test("valet summarizes the chat in place, and history starts from the summary", async () => {
+    const {
+      impl,
+      store,
+      model: m,
+    } = await setup([
+      entry("s1", "user", [text("old question")]),
+      entry("s1", "assistant", [text("old answer")], { runId: "r1" }),
+    ]);
+    const seen: string[] = [];
+    await impl.compact({ sessionId: "s1", reason: "manual", by: valet("SUMMARY", seen) });
+    expect(seen).toEqual(["user: old question\n\nassistant: old answer"]);
+    const last = store.s1[1]?.message.seq ?? -1;
+    expect(store.s1.at(-1)?.parts[0]?.data).toEqual({
+      type: "compaction",
+      by: "valet",
+      coversThroughSeq: last,
+      summary: "SUMMARY",
+    });
+    store.s1.push(entry("s1", "user", [text("new question")]));
+    const built = await impl.build({ ...prompt("s1"), model: m });
+    expect(built.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "[valet: summary of the earlier part of this chat, compacted by valet]\nSUMMARY",
+          },
+        ],
+      },
+      { role: "user", content: [{ type: "text", text: "new question" }] },
+    ]);
+  });
+
+  test("a second valet compaction folds the earlier summary into the new one", async () => {
+    const { impl, store } = await setup([entry("s1", "user", [text("first")])]);
+    await impl.compact({ sessionId: "s1", reason: "manual", by: valet("ONE") });
+    store.s1.push(entry("s1", "assistant", [text("second")], { runId: "r2" }));
+    const seen: string[] = [];
+    await impl.compact({ sessionId: "s1", reason: "auto", by: valet("TWO", seen) });
+    expect(seen).toEqual(["Earlier summary:\nONE\n\nassistant: second"]);
+  });
+
+  test("a harness marker is recorded but leaves valet's history untouched", async () => {
+    const { impl, store, model: m } = await setup([entry("s1", "user", [text("hello")])]);
+    const covers = store.s1[0]?.message.seq ?? -1;
+    await impl.compact({ sessionId: "s1", reason: "auto", by: { kind: "harness", label: "Claude Code" } });
+    expect(store.s1.at(-1)?.parts[0]?.data).toEqual({
+      type: "compaction",
+      by: "Claude Code",
+      coversThroughSeq: covers,
+    });
+    const built = await impl.build({ ...prompt("s1"), model: m });
+    expect(built.messages).toEqual([{ role: "user", content: [{ type: "text", text: "hello" }] }]);
+  });
+
+  test("valet refuses an empty chat", async () => {
+    const { impl } = await setup([]);
+    await expect(impl.compact({ sessionId: "s1", reason: "manual", by: valet("x") })).rejects.toThrow(
+      "nothing to compact yet",
     );
   });
 });
