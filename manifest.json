@@ -6,5 +6,5 @@
   "description": "Defines and provides context@1: persona file loading, preamble, context build.",
   "valet": "^0.1.0",
   "main": "./src/index.ts",
-  "provides": ["context"]
+  "provides": ["context@1"]
 }
