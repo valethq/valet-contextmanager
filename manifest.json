@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "valet-contextmanager",
+  "name": "valet-contextmanager",
+  "version": "0.1.0",
+  "description": "Defines and provides context@1: persona file loading, preamble, context build.",
+  "valet": "^0.1.0",
+  "main": "./src/index.ts",
+  "provides": [
+    "context"
+  ]
+}
