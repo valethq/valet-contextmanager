@@ -1,9 +1,13 @@
-import type { Message, ModelContent, ModelMessage, PluginContext, Role } from "@valethq/sdk";
+import type { Message, ModelContent, ModelInfo, ModelMessage, PluginContext, Role } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
 import type { ContextManager, PersonaFile } from "./types";
 
-function renderPreamble(files: PersonaFile[]): string {
-  return ["# Persona", ...files.map((f) => `## ${f.path}\n\n${f.content}`)].join("\n\n");
+function renderPreamble(files: PersonaFile[], model?: ModelInfo): string {
+  const sections = ["# Persona", ...files.map((f) => `## ${f.path}\n\n${f.content}`)];
+  if (model && Number.isFinite(model.contextWindow) && model.contextWindow > 0) {
+    sections.push(`Context window: ${model.contextWindow} tokens (model ${model.id}).`);
+  }
+  return sections.join("\n\n");
 }
 
 function toModelMessage(message: Message, content: ModelContent[]): ModelMessage {
@@ -36,7 +40,7 @@ export function createContextManager(ctx: PluginContext): ContextManager {
 
     async build({ sessionId, runId, model, role }) {
       const files = await loadFiles(sessionId, role);
-      const system = renderPreamble(files);
+      const system = renderPreamble(files, model);
       const messages: ModelMessage[] = [];
       const chars: number[] = [];
       for (const { message, parts } of ctx.store.messages.list(sessionId)) {

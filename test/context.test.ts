@@ -28,7 +28,9 @@ describe("build", () => {
       entry("s1", "system", [text("note")]),
     ]);
     const built = await impl.build({ sessionId: "s1", runId: "r2", model: m, role: "owner" });
-    expect(built.system).toBe("# Persona\n\n## AGENTS.md\n\nag");
+    expect(built.system).toBe(
+      "# Persona\n\n## AGENTS.md\n\nag\n\nContext window: 1000000 tokens (model test-model).",
+    );
     expect(built.messages).toEqual([
       { role: "user", content: [{ type: "text", text: "hello" }] },
       { role: "assistant", content: [{ type: "text", text: "hi there" }] },
@@ -58,6 +60,12 @@ describe("build", () => {
     expect(Math.ceil((built.system.length + 200) / 4)).toBeLessThanOrEqual(80);
     expect(built.estimatedTokens).toBeLessThanOrEqual(80);
     expect(built.messages[0]?.role).toBe("user");
+  });
+
+  test("omits the context-window line when the window is unknown", async () => {
+    const { impl } = await bootBuild([]);
+    const built = await impl.build({ sessionId: "s1", runId: "r1", model: model(0), role: "owner" });
+    expect(built.system).toBe("# Persona\n\n## AGENTS.md\n\nag");
   });
 
   test("empty history yields no messages", async () => {

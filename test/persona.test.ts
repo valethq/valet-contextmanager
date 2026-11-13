@@ -68,6 +68,51 @@ describe("preamble", () => {
     expect(guest).not.toContain("MEMORY.md");
   });
 
+  test("injects the two most recent daily notes on or before today, older first", async () => {
+    const at = (offset: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      return dayKey(d);
+    };
+    const dir = await workspace({
+      [`memory/${at(-8)}.md`]: "old daily",
+      [`memory/${at(-4)}.md`]: "recent daily",
+      [`memory/${at(0)}.md`]: "today daily",
+      [`memory/${at(10)}.md`]: "future daily",
+      "memory/notes.md": "not a daily",
+    });
+    const { impl } = await bootWith(dir);
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    const recent = out.indexOf(`## memory/${at(-4)}.md`);
+    const today = out.indexOf(`## memory/${at(0)}.md`);
+    expect(recent).toBeGreaterThan(-1);
+    expect(today).toBeGreaterThan(recent);
+    expect(out).toContain("recent daily");
+    expect(out).toContain("today daily");
+    expect(out).not.toContain("old daily");
+    expect(out).not.toContain("future daily");
+    expect(out).not.toContain("not a daily");
+  });
+
+  test("a 40,000-byte AGENTS.md arrives intact, last line included", async () => {
+    const lastLine = "END-OF-PERSONA-FILE";
+    const content = `${"x".repeat(40_000 - lastLine.length - 1)}\n${lastLine}`;
+    const dir = await workspace({ "AGENTS.md": content });
+    const { impl, warns } = await bootWith(dir);
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe(`# Persona\n\n## AGENTS.md\n\n${content}`);
+    expect(out.endsWith(lastLine)).toBe(true);
+    expect(out).not.toContain("[valet: truncated");
+    expect(warns).toHaveLength(0);
+  });
+
+  test("preamble has no model, so no context-window line", async () => {
+    const dir = await workspace({ "AGENTS.md": "ag" });
+    const { impl } = await bootWith(dir);
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).not.toContain("Context window:");
+  });
+
   test("missing files are skipped silently", async () => {
     const dir = await workspace({ "SOUL.md": "only soul" });
     const { impl, warns } = await bootWith(dir);

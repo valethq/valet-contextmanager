@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Logger, Role } from "@valethq/sdk";
 import type { PersonaFile } from "./types";
 
 const DEFAULT_CAP = 65536;
+const DAILY_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 const ROLE_RANK: Record<Role, number> = { guest: 0, trusted: 1, owner: 2 };
 const FILE_ROLES = new Set<PersonaFile["role"]>([
   "agents",
@@ -28,25 +29,36 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
-export function defaultPersonaFiles(): PersonaEntry[] {
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  return [
+export async function defaultPersonaFiles(workspaceDir: string): Promise<PersonaEntry[]> {
+  const files: PersonaEntry[] = [
     { path: "AGENTS.md", role: "agents" },
     { path: "SOUL.md", role: "soul" },
     { path: "IDENTITY.md", role: "identity" },
     { path: "USER.md", role: "user" },
     { path: "MEMORY.md", role: "memory", minRole: "owner" },
-    { path: `memory/${dayKey(yesterday)}.md`, role: "daily", minRole: "owner" },
-    { path: `memory/${dayKey(today)}.md`, role: "daily", minRole: "owner" },
   ];
+  let names: string[] = [];
+  try {
+    names = (await readdir(resolve(workspaceDir, "memory"), { withFileTypes: true }))
+      .filter((e) => e.isFile() && DAILY_RE.test(e.name))
+      .map((e) => e.name);
+  } catch {
+    // no memory dir means no daily files
+  }
+  const today = dayKey(new Date());
+  for (const name of names
+    .filter((n) => n.slice(0, 10) <= today)
+    .sort()
+    .slice(-2)) {
+    files.push({ path: `memory/${name}`, role: "daily", minRole: "owner" });
+  }
+  return files;
 }
 
-function personaSpec(settings: Record<string, unknown>): { files: PersonaEntry[]; cap: number } {
+function personaSpec(settings: Record<string, unknown>): { files: PersonaEntry[] | null; cap: number } {
   const raw = settings.persona;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { files: defaultPersonaFiles(), cap: DEFAULT_CAP };
+    return { files: null, cap: DEFAULT_CAP };
   }
   const p = raw as { files?: unknown; maxBytesPerFile?: unknown };
   const files = Array.isArray(p.files)
@@ -62,7 +74,7 @@ function personaSpec(settings: Record<string, unknown>): { files: PersonaEntry[]
           },
         ];
       })
-    : defaultPersonaFiles();
+    : null;
   const cap =
     typeof p.maxBytesPerFile === "number" && p.maxBytesPerFile > 0 ? p.maxBytesPerFile : DEFAULT_CAP;
   return { files, cap };
@@ -74,7 +86,9 @@ export async function loadPersonaFiles(
   role: Role,
   log: Logger,
 ): Promise<PersonaFile[]> {
-  const { files, cap } = personaSpec(settings);
+  const spec = personaSpec(settings);
+  const files = spec.files ?? (await defaultPersonaFiles(workspaceDir));
+  const { cap } = spec;
   const decoder = new TextDecoder();
   const out: PersonaFile[] = [];
   for (const f of files) {
