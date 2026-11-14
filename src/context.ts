@@ -46,6 +46,12 @@ function toModelMessage(message: Message, content: ModelContent[]): ModelMessage
   }
 }
 
+// spec-gap: file parts have no ModelContent form beyond images, so history carries a text note instead.
+function fileNote(message: Message, file: Extract<PartData, { type: "file" }>): string {
+  const verb = message.role === "assistant" ? "presented to the user" : "attached";
+  return `[${verb}: ${file.name} (${file.mime})]`;
+}
+
 const SUMMARY_HEAD = "[valet: summary of the earlier part of this chat, compacted by valet]";
 
 interface Entry {
@@ -161,7 +167,9 @@ export function createContextManager(ctx: PluginContext): ContextManager {
       for (const { message, parts } of entries) {
         if (message.role === "assistant" && message.runId === runId) continue;
         if (cut && message.seq <= cut.coversThroughSeq) continue;
-        const texts = parts.flatMap((p) => (p.data.type === "text" ? [p.data.text] : []));
+        const texts = parts.flatMap(({ data }) =>
+          data.type === "text" ? [data.text] : data.type === "file" ? [fileNote(message, data)] : [],
+        );
         if (texts.length === 0) continue;
         const content: ModelContent[] = texts.map((t) => ({ type: "text", text: t }));
         messages.push(toModelMessage(message, content));

@@ -43,6 +43,36 @@ describe("build", () => {
     );
   });
 
+  test("file parts ride as text notes: attached on user messages, presented on assistant messages", async () => {
+    const file = (name: string, mime: string) => ({ type: "file" as const, blobId: "blb_1", name, mime });
+    const { impl, model: m } = await bootBuild([
+      entry("s1", "user", [text("look"), file("a.png", "image/png")]),
+      entry("s1", "assistant", [file("out/b.txt", "text/plain"), text("done")], { runId: "r1" }),
+      entry("s1", "assistant", [file("only.zip", "application/zip")], { runId: "r1" }),
+    ]);
+    const built = await impl.build({ sessionId: "s1", runId: "r2", model: m, role: "owner" });
+    expect(built.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look" },
+          { type: "text", text: "[attached: a.png (image/png)]" },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "[presented to the user: out/b.txt (text/plain)]" },
+          { type: "text", text: "done" },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "[presented to the user: only.zip (application/zip)]" }],
+      },
+    ]);
+  });
+
   test("trims oldest messages over 80% of the context window", async () => {
     const long = "x".repeat(100);
     const { impl, model: m } = await bootBuild(
