@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Logger, PersonaFile, Role } from "@valethq/sdk";
+import { matchPatterns } from "./patterns";
 
 export const DEFAULT_CAP = 65536;
 const DAILY_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
@@ -57,12 +58,15 @@ export async function defaultPersonaFiles(workspaceDir: string): Promise<Persona
 function personaSpec(
   settings: Record<string, unknown>,
   defaultCap: number,
-): { files: PersonaEntry[] | null; cap: number } {
+): { files: PersonaEntry[] | null; patterns: string[] | null; cap: number } {
   const raw = settings.persona;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { files: null, cap: defaultCap };
+    return { files: null, patterns: null, cap: defaultCap };
   }
-  const p = raw as { files?: unknown; maxBytesPerFile?: unknown };
+  const p = raw as { files?: unknown; patterns?: unknown; maxBytesPerFile?: unknown };
+  const patterns = Array.isArray(p.patterns)
+    ? p.patterns.filter((x): x is string => typeof x === "string")
+    : null;
   const files = Array.isArray(p.files)
     ? p.files.flatMap((e): PersonaEntry[] => {
         if (!e || typeof e !== "object") return [];
@@ -78,7 +82,23 @@ function personaSpec(
       })
     : null;
   const cap = typeof p.maxBytesPerFile === "number" && p.maxBytesPerFile > 0 ? p.maxBytesPerFile : defaultCap;
-  return { files, cap };
+  return { files, patterns, cap };
+}
+
+/** Explicit `files` and `patterns` replace the defaults; pattern matches follow the listed files, deduplicated. */
+async function personaEntries(
+  workspaceDir: string,
+  spec: { files: PersonaEntry[] | null; patterns: string[] | null },
+  log: Logger,
+): Promise<PersonaEntry[]> {
+  if (spec.files === null && spec.patterns === null) return defaultPersonaFiles(workspaceDir);
+  const listed = spec.files ?? [];
+  if (spec.patterns === null) return listed;
+  const taken = new Set(listed.map((f) => f.path));
+  const matched = (await matchPatterns(workspaceDir, spec.patterns, log))
+    .filter((path) => !taken.has(path))
+    .map((path): PersonaEntry => ({ path }));
+  return [...listed, ...matched];
 }
 
 export async function loadPersonaFiles(
@@ -89,7 +109,7 @@ export async function loadPersonaFiles(
   defaultCap = DEFAULT_CAP,
 ): Promise<PersonaFile[]> {
   const spec = personaSpec(settings, defaultCap);
-  const files = spec.files ?? (await defaultPersonaFiles(workspaceDir));
+  const files = await personaEntries(workspaceDir, spec, log);
   const { cap } = spec;
   const decoder = new TextDecoder();
   const out: PersonaFile[] = [];

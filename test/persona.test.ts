@@ -191,3 +191,72 @@ describe("preamble", () => {
     expect(guest).toBe("# Persona\n\n## B.md\n\nb content");
   });
 });
+
+describe("patterns", () => {
+  test("loads files matching each regex, in pattern order, replacing the defaults", async () => {
+    const dir = await workspace({
+      "AGENTS.md": "agents content",
+      "README.md": "readme content",
+      "docs/b.md": "doc b",
+      "docs/a.md": "doc a",
+      "src/x.ts": "code x",
+    });
+    const { impl } = await bootWith(dir, { persona: { patterns: ["^README\\.md$", "^docs/.*\\.md$"] } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe(
+      "# Persona\n\n## README.md\n\nreadme content\n\n## docs/a.md\n\ndoc a\n\n## docs/b.md\n\ndoc b",
+    );
+  });
+
+  test("a file matched by several patterns loads once", async () => {
+    const dir = await workspace({ "docs/a.md": "doc a" });
+    const { impl } = await bootWith(dir, { persona: { patterns: ["\\.md$", "^docs/"] } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe("# Persona\n\n## docs/a.md\n\ndoc a");
+  });
+
+  test("explicit files come first and are not repeated by a pattern", async () => {
+    const dir = await workspace({ "A.md": "a content", "B.md": "b content" });
+    const { impl } = await bootWith(dir, {
+      persona: { files: [{ path: "B.md", role: "soul" }], patterns: ["\\.md$"] },
+    });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe("# Persona\n\n## B.md\n\nb content\n\n## A.md\n\na content");
+  });
+
+  test("an empty patterns array with no files loads nothing", async () => {
+    const dir = await workspace({ "AGENTS.md": "ag" });
+    const { impl } = await bootWith(dir, { persona: { patterns: [] } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe("# Persona");
+  });
+
+  test("skips .git and node_modules, and matches forward-slash relative paths", async () => {
+    const dir = await workspace({
+      ".git/config.md": "git",
+      "node_modules/pkg/readme.md": "dep",
+      "packages/core/notes.md": "nested",
+    });
+    const { impl } = await bootWith(dir, { persona: { patterns: ["\\.md$", "^packages/core/"] } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe("# Persona\n\n## packages/core/notes.md\n\nnested");
+  });
+
+  test("invalid regex is skipped with a warning, other patterns still load", async () => {
+    const dir = await workspace({ "A.md": "a content" });
+    const { impl, warns } = await bootWith(dir, { persona: { patterns: ["(unclosed", "^A\\.md$", 42] } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe("# Persona\n\n## A.md\n\na content");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.data?.pattern).toBe("(unclosed");
+  });
+
+  test("matched files obey the per-file cap", async () => {
+    const dir = await workspace({ "big.md": "x".repeat(20) });
+    const { impl } = await bootWith(dir, { persona: { patterns: ["^big\\.md$"], maxBytesPerFile: 10 } });
+    const out = await impl.preamble({ sessionId: "s1", role: "owner" });
+    expect(out).toBe(
+      `# Persona\n\n## big.md\n\n${"x".repeat(10)}\n\n[valet: truncated 10 bytes over the per-file cap]`,
+    );
+  });
+});
