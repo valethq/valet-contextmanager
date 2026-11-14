@@ -1,16 +1,17 @@
 import type {
+  ContextManager,
   Message,
   ModelContent,
   ModelMessage,
   Part,
   PartData,
   PartWriter,
+  PersonaFile,
   PluginContext,
   Role,
 } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
 import { compactionThreshold, personaCap } from "./settings";
-import type { ContextManager, PersonaFile } from "./types";
 
 const AGENTS_RULE_NOTE =
   "(Devin CLI also loads this file as an always-on rule cut at 16 KB; this full copy supersedes it.)";

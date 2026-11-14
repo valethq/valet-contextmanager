@@ -1,7 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { Logger, Role } from "@valethq/sdk";
-import type { PersonaFile } from "./types";
+import type { Logger, PersonaFile, Role } from "@valethq/sdk";
 
 export const DEFAULT_CAP = 65536;
 const DAILY_RE = /^\d{4}-\d{2}-\d{2}\.md$/;

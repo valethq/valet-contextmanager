@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
+  ContextManager,
   Message,
   ModelInfo,
   Part,
@@ -10,9 +11,9 @@ import type {
   Project,
   ScopeDefinition,
   Session,
+  UtilityModel,
 } from "@valethq/sdk";
 import plugin from "../src/index";
-import type { ContextManager } from "../src/types";
 
 const dirs: string[] = [];
 
@@ -118,6 +119,10 @@ export interface Booted {
   defined: ScopeDefinition[];
   provided: { scope: string; impl: unknown; key?: string }[];
   kv: Map<string, unknown>;
+  titles: { id: string; title: string }[];
+  session(id: string): Session | undefined;
+  /** Fires the plugin's `after` hooks for an event, like the kernel would. */
+  fire(name: string, payload: unknown): Promise<void>;
 }
 
 export function boot(
@@ -125,6 +130,7 @@ export function boot(
     sessions?: Session[];
     projects?: Project[];
     messages?: Record<string, { message: Message; parts: Part[] }[]>;
+    inference?: Record<string, { utility?: UtilityModel }>;
   } = {},
 ): Booted {
   const warns: Booted["warns"] = [];
@@ -134,6 +140,8 @@ export function boot(
   const projects = new Map((o.projects ?? []).map((p) => [p.id, p]));
   const kv = new Map<string, unknown>();
   const messages = o.messages ?? {};
+  const titles: Booted["titles"] = [];
+  const hooks = new Map<string, ((e: unknown) => unknown)[]>();
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
     config: {},
@@ -152,12 +160,32 @@ export function boot(
       get: () => {
         throw new Error("no scopes in test ctx");
       },
-      maybe: () => undefined,
+      maybe: (scope: string, key?: string) => (scope === "inference" ? o.inference?.[key ?? ""] : undefined),
       all: () => [],
       watch: () => ({ dispose() {} }),
     },
+    events: {
+      after: (name: string, fn: (e: unknown) => unknown) => {
+        hooks.set(name, [...(hooks.get(name) ?? []), fn]);
+        return { active: true, disconnect() {} };
+      },
+    },
     store: {
-      sessions: { get: (id: string) => sessions.get(id) },
+      sessions: {
+        get: (id: string) => sessions.get(id),
+        update: async (id: string, patch: { title?: string; settings?: Session["settings"] }) => {
+          const current = sessions.get(id);
+          if (!current || (patch.title === undefined && patch.settings === undefined)) return current;
+          const next = {
+            ...current,
+            title: patch.title ?? current.title,
+            settings: patch.settings ?? current.settings,
+          };
+          sessions.set(id, next);
+          if (patch.title !== undefined) titles.push({ id, title: patch.title });
+          return next;
+        },
+      },
       projects: { get: (id: string) => projects.get(id) },
       messages: {
         list: (sessionId: string) => messages[sessionId] ?? [],
@@ -209,5 +237,9 @@ export function boot(
   } as unknown as PluginContext;
   plugin.activate(ctx);
   const impl = provided[0]?.impl as ContextManager;
-  return { impl, warns, defined, provided, kv };
+  const fire = async (name: string, payload: unknown) => {
+    for (const fn of hooks.get(name) ?? []) await fn({ payload, cancelled: false });
+    await new Promise((r) => setTimeout(r, 0));
+  };
+  return { impl, warns, defined, provided, kv, titles, session: (id) => sessions.get(id), fire };
 }

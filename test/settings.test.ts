@@ -53,7 +53,11 @@ test("personaMaxBytesPerFile caps default persona files", async () => {
 test("panel set validates and persists", async () => {
   const b = boot();
   const p = panel(b);
-  expect(await p.get()).toEqual({ compactionThreshold: 0.8, personaMaxBytesPerFile: 65536 });
+  expect(await p.get()).toEqual({
+    compactionThreshold: 0.8,
+    personaMaxBytesPerFile: 65536,
+    autoNameSessions: true,
+  });
   await p.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 1024 });
   expect(b.kv.get("compactionThreshold")).toBe(0.5);
   expect(b.kv.get("personaMaxBytesPerFile")).toBe(1024);

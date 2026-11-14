@@ -27,6 +27,12 @@ export function personaCap(ctx: PluginContext): number {
   return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : DEFAULT_CAP;
 }
 
+/** Names a session with the provider's Utility model after its first completed run. On by default. */
+export function autoNameSessions(ctx: PluginContext): boolean {
+  const v = ctx.storage.kv.get<boolean>("autoNameSessions");
+  return typeof v === "boolean" ? v : true;
+}
+
 export function registerSettings(ctx: PluginContext): void {
   ctx.scopes.define({ name: "settings", version: 1, cardinality: "many" });
   ctx.scopes.provide(
@@ -48,11 +54,18 @@ export function registerSettings(ctx: PluginContext): void {
             title: "Persona byte cap",
             description: "Max bytes read per persona file when the project doesn't set maxBytesPerFile.",
           },
+          autoNameSessions: {
+            type: "boolean",
+            title: "Name sessions automatically",
+            description:
+              "After a session's first reply, title it with the provider's Utility model (set in the provider's own panel).",
+          },
         },
       },
       get: () => ({
         compactionThreshold: compactionThreshold(ctx),
         personaMaxBytesPerFile: personaCap(ctx),
+        autoNameSessions: autoNameSessions(ctx),
       }),
       set: (v) => {
         const t = v.compactionThreshold;
@@ -61,6 +74,10 @@ export function registerSettings(ctx: PluginContext): void {
         const cap = v.personaMaxBytesPerFile;
         if (typeof cap !== "number" || !Number.isInteger(cap) || cap <= 0)
           throw new Error("personaMaxBytesPerFile must be a positive integer");
+        if (v.autoNameSessions !== undefined && typeof v.autoNameSessions !== "boolean")
+          throw new Error("autoNameSessions must be a boolean");
+        if (typeof v.autoNameSessions === "boolean")
+          ctx.storage.kv.set("autoNameSessions", v.autoNameSessions);
         ctx.storage.kv.set("compactionThreshold", t);
         ctx.storage.kv.set("personaMaxBytesPerFile", cap);
       },
