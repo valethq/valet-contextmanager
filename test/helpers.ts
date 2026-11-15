@@ -55,6 +55,7 @@ export function session(id: string, projectId: string): Session {
     createdAt: 0,
     updatedAt: 0,
     lastMessageAt: null,
+    lastResponseAt: null,
   };
 }
 
