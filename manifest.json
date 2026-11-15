@@ -3,8 +3,8 @@
   "id": "valet-contextmanager",
   "name": "Context",
   "version": "0.1.0",
-  "description": "Defines and provides context@1: persona file loading, preamble, context build.",
+  "description": "Defines and provides context@1: persona file loading, preamble, context build, and the view_image tool.",
   "valet": "^0.1.0",
   "main": "./src/index.ts",
-  "provides": ["context@1", "settings@1"]
+  "provides": ["context@1", "settings@1", "tools@1"]
 }

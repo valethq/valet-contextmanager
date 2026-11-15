@@ -9,7 +9,7 @@ const panel = (b: ReturnType<typeof boot>) =>
 
 test("settings panel registers on the settings scope", () => {
   const b = boot();
-  expect(b.provided.map((p) => p.scope)).toEqual(["context", "settings"]);
+  expect(b.provided.map((p) => p.scope)).toEqual(["context", "settings", "tools"]);
   expect(panel(b).title).toBe("Context");
 });
 
