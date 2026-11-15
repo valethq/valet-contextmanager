@@ -168,7 +168,11 @@ export function createContextManager(ctx: PluginContext): ContextManager {
         if (message.role === "assistant" && message.runId === runId) continue;
         if (cut && message.seq <= cut.coversThroughSeq) continue;
         const texts = parts.flatMap(({ data }) =>
-          data.type === "text" ? [data.text] : data.type === "file" ? [fileNote(message, data)] : [],
+          data.type === "text" || data.type === "custom"
+            ? [data.text]
+            : data.type === "file"
+              ? [fileNote(message, data)]
+              : [],
         );
         if (texts.length === 0) continue;
         const content: ModelContent[] = texts.map((t) => ({ type: "text", text: t }));

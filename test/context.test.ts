@@ -43,6 +43,19 @@ describe("build", () => {
     );
   });
 
+  test("a custom part reaches the model as its text, never its title or data", async () => {
+    const custom = {
+      type: "custom" as const,
+      kind: "valet-exec/job-end@1",
+      title: "Process finished",
+      text: "job 1 exited 0",
+      data: { jobId: 1 },
+    };
+    const { impl, model: m } = await bootBuild([entry("s1", "system", [custom])]);
+    const built = await impl.build({ sessionId: "s1", runId: "r9", model: m, role: "owner" });
+    expect(built.messages).toEqual([{ role: "user", content: [{ type: "text", text: "job 1 exited 0" }] }]);
+  });
+
   test("file parts ride as text notes: attached on user messages, presented on assistant messages", async () => {
     const file = (name: string, mime: string) => ({ type: "file" as const, blobId: "blb_1", name, mime });
     const { impl, model: m } = await bootBuild([
