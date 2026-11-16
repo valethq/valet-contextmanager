@@ -33,6 +33,12 @@ export function autoNameSessions(ctx: PluginContext): boolean {
   return typeof v === "boolean" ? v : true;
 }
 
+/** Whether the preamble lists skills and skill_read is offered. On by default; a project can still opt out. */
+export function skillsEnabled(ctx: PluginContext): boolean {
+  const v = ctx.storage.kv.get<boolean>("skillsEnabled");
+  return typeof v === "boolean" ? v : true;
+}
+
 export function registerSettings(ctx: PluginContext): void {
   ctx.scopes.define({ name: "settings", version: 1, cardinality: "many" });
   ctx.scopes.provide(
@@ -60,12 +66,19 @@ export function registerSettings(ctx: PluginContext): void {
             description:
               "After a session's first reply, title it with the provider's Utility model (set in the provider's own panel).",
           },
+          skillsEnabled: {
+            type: "boolean",
+            title: "Skills",
+            description:
+              "List skills (<workspace>/skills and ~/.valet/skills, SKILL.md files) in the preamble and offer skill_read. A project's settings.skills can turn them off or change the folders.",
+          },
         },
       },
       get: () => ({
         compactionThreshold: compactionThreshold(ctx),
         personaMaxBytesPerFile: personaCap(ctx),
         autoNameSessions: autoNameSessions(ctx),
+        skillsEnabled: skillsEnabled(ctx),
       }),
       set: (v) => {
         const t = v.compactionThreshold;
@@ -76,6 +89,9 @@ export function registerSettings(ctx: PluginContext): void {
           throw new Error("personaMaxBytesPerFile must be a positive integer");
         if (v.autoNameSessions !== undefined && typeof v.autoNameSessions !== "boolean")
           throw new Error("autoNameSessions must be a boolean");
+        if (v.skillsEnabled !== undefined && typeof v.skillsEnabled !== "boolean")
+          throw new Error("skillsEnabled must be a boolean");
+        if (typeof v.skillsEnabled === "boolean") ctx.storage.kv.set("skillsEnabled", v.skillsEnabled);
         if (typeof v.autoNameSessions === "boolean")
           ctx.storage.kv.set("autoNameSessions", v.autoNameSessions);
         ctx.storage.kv.set("compactionThreshold", t);

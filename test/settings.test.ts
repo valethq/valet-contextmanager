@@ -9,7 +9,7 @@ const panel = (b: ReturnType<typeof boot>) =>
 
 test("settings panel registers on the settings scope", () => {
   const b = boot();
-  expect(b.provided.map((p) => p.scope)).toEqual(["context", "settings", "tools"]);
+  expect(b.provided.map((p) => p.scope)).toEqual(["context", "settings", "tools", "tools"]);
   expect(panel(b).title).toBe("Context");
 });
 
@@ -57,8 +57,13 @@ test("panel set validates and persists", async () => {
     compactionThreshold: 0.8,
     personaMaxBytesPerFile: 65536,
     autoNameSessions: true,
+    skillsEnabled: true,
   });
-  await p.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 1024 });
+  await p.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 1024, skillsEnabled: false });
+  expect(b.kv.get("skillsEnabled")).toBe(false);
+  expect(() =>
+    p.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 1024, skillsEnabled: "no" }),
+  ).toThrow("skillsEnabled");
   expect(b.kv.get("compactionThreshold")).toBe(0.5);
   expect(b.kv.get("personaMaxBytesPerFile")).toBe(1024);
   expect(() => p.set({ compactionThreshold: 2, personaMaxBytesPerFile: 1024 })).toThrow(

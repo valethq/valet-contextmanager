@@ -11,12 +11,18 @@ import type {
   Role,
 } from "@valethq/sdk";
 import { loadPersonaFiles } from "./persona";
+import { loadSkills } from "./skillLoad";
+import { renderSkills } from "./skills";
 import { compactionThreshold, personaCap } from "./settings";
 
 const AGENTS_RULE_NOTE =
   "(Devin CLI also loads this file as an always-on rule cut at 16 KB; this full copy supersedes it.)";
 
-function renderPreamble(files: PersonaFile[], model?: { id: string; contextWindow?: number }): string {
+function renderPreamble(
+  files: PersonaFile[],
+  skills: string,
+  model?: { id: string; contextWindow?: number },
+): string {
   const sections = [
     "# Persona",
     ...files.map((f) =>
@@ -25,6 +31,7 @@ function renderPreamble(files: PersonaFile[], model?: { id: string; contextWindo
         : `## ${f.path}\n\n${f.content}`,
     ),
   ];
+  if (skills !== "") sections.push(skills);
   const cw = model?.contextWindow;
   if (model && typeof cw === "number" && Number.isFinite(cw) && cw > 0) {
     sections.push(`Context window: ${cw} tokens (model ${model.id}).`);
@@ -149,12 +156,16 @@ export function createContextManager(ctx: PluginContext): ContextManager {
 
   return {
     async preamble({ sessionId, role, model }) {
-      return renderPreamble(await loadFiles(sessionId, role), model);
+      return renderPreamble(
+        await loadFiles(sessionId, role),
+        renderSkills(await loadSkills(ctx, sessionId, role)),
+        model,
+      );
     },
 
     async build({ sessionId, runId, model, role }) {
       const files = await loadFiles(sessionId, role);
-      const system = renderPreamble(files, model);
+      const system = renderPreamble(files, renderSkills(await loadSkills(ctx, sessionId, role)), model);
       const entries = ctx.store.messages.list(sessionId);
       const cut = latestSummary(entries);
       const messages: ModelMessage[] = [];

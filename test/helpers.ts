@@ -10,6 +10,7 @@ import type {
   PartData,
   PluginContext,
   Project,
+  Role,
   ScopeDefinition,
   Session,
   ToolDefinition,
@@ -125,10 +126,12 @@ export interface Booted {
   kv: Map<string, unknown>;
   titles: { id: string; title: string }[];
   session(id: string): Session | undefined;
-  /** The tools@1 provider's owner-role tool list. */
+  /** The keyless tools@1 provider's owner-role tool list (view_image, session_search, session_view). */
   tools: ToolDefinition[];
   /** Fires the plugin's `after` hooks for an event, like the kernel would. */
   fire(name: string, payload: unknown): Promise<void>;
+  /** skill_read's provider (key "skills"): the tools a run in this session and role would get. */
+  skillTools(sessionId: string, role: Role): Promise<ToolDefinition[]>;
 }
 
 export function boot(
@@ -137,6 +140,7 @@ export function boot(
     projects?: Project[];
     messages?: Record<string, { message: Message; parts: Part[] }[]>;
     inference?: Record<string, { utility?: UtilityModel }>;
+    valetHome?: string;
   } = {},
 ): Booted {
   const warns: Booted["warns"] = [];
@@ -251,6 +255,11 @@ export function boot(
         list: () => [...kv.keys()],
       },
     },
+    paths: {
+      data: "/nonexistent",
+      cache: "/nonexistent",
+      valetHome: o.valetHome ?? "/nonexistent-valet-home",
+    },
     signal: new AbortController().signal,
     onDispose() {},
   } as unknown as PluginContext;
@@ -260,7 +269,21 @@ export function boot(
     for (const fn of hooks.get(name) ?? []) await fn({ payload, cancelled: false });
     await new Promise((r) => setTimeout(r, 0));
   };
-  const toolProvider = provided.find((p) => p.scope === "tools")?.impl as ToolProvider;
+  const toolProvider = provided.find((p) => p.scope === "tools" && p.key === undefined)?.impl as ToolProvider;
   const tools = toolProvider.list({ sessionId: "s", projectId: "p", role: "owner" }) as ToolDefinition[];
-  return { impl, warns, defined, provided, kv, titles, session: (id) => sessions.get(id), tools, fire };
+  const skillProvider = provided.find((p) => p.scope === "tools" && p.key === "skills")?.impl as ToolProvider;
+  const skillTools = async (sessionId: string, role: Role) =>
+    skillProvider.list({ sessionId, projectId: "p", role });
+  return {
+    impl,
+    warns,
+    defined,
+    provided,
+    kv,
+    titles,
+    session: (id) => sessions.get(id),
+    tools,
+    fire,
+    skillTools,
+  };
 }

@@ -4,6 +4,8 @@ import { viewImageTool } from "./image";
 import { registerNaming } from "./naming";
 import { createSearchIndex } from "./searchIndex";
 import { sessionSearchTool, sessionViewTool } from "./sessionTools";
+import { skillReadTool } from "./skillTool";
+import { loadSkills } from "./skillLoad";
 import { registerSettings } from "./settings";
 
 export default definePlugin({
@@ -17,5 +19,15 @@ export default definePlugin({
       list: ({ role }) =>
         role === "owner" ? [viewImageTool(ctx), sessionSearchTool(ctx, index), sessionViewTool(ctx)] : [],
     });
+    ctx.scopes.provide(
+      "tools",
+      {
+        async list({ sessionId, role }) {
+          const any = (await loadSkills(ctx, sessionId, role)).length > 0;
+          return any ? [skillReadTool((call) => loadSkills(ctx, call.sessionId, call.role))] : [];
+        },
+      },
+      { key: "skills" },
+    );
   },
 });
