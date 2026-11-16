@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +12,8 @@ import type {
   Project,
   ScopeDefinition,
   Session,
+  ToolDefinition,
+  ToolProvider,
   UtilityModel,
 } from "@valethq/sdk";
 import plugin from "../src/index";
@@ -122,6 +125,8 @@ export interface Booted {
   kv: Map<string, unknown>;
   titles: { id: string; title: string }[];
   session(id: string): Session | undefined;
+  /** The tools@1 provider's owner-role tool list. */
+  tools: ToolDefinition[];
   /** Fires the plugin's `after` hooks for an event, like the kernel would. */
   fire(name: string, payload: unknown): Promise<void>;
 }
@@ -143,6 +148,7 @@ export function boot(
   const messages = o.messages ?? {};
   const titles: Booted["titles"] = [];
   const hooks = new Map<string, ((e: unknown) => unknown)[]>();
+  const db = new Database(":memory:");
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
     config: {},
@@ -174,6 +180,7 @@ export function boot(
     store: {
       sessions: {
         get: (id: string) => sessions.get(id),
+        list: () => [...sessions.values()],
         update: async (id: string, patch: { title?: string; settings?: Session["settings"] }) => {
           const current = sessions.get(id);
           if (!current || (patch.title === undefined && patch.settings === undefined)) return current;
@@ -189,7 +196,12 @@ export function boot(
       },
       projects: { get: (id: string) => projects.get(id) },
       messages: {
-        list: (sessionId: string) => messages[sessionId] ?? [],
+        list: (sessionId: string, q: { beforeSeq?: number; limit?: number } = {}) => {
+          const all = (messages[sessionId] ?? []).filter(
+            (e) => q.beforeSeq === undefined || e.message.seq < q.beforeSeq,
+          );
+          return q.limit === undefined ? all : all.slice(-q.limit);
+        },
         create: async (input: { sessionId: string; role: Message["role"]; parts: PartData[] }) => {
           const e = entry(input.sessionId, input.role, input.parts);
           messages[input.sessionId] = [...(messages[input.sessionId] ?? []), e];
@@ -226,6 +238,12 @@ export function boot(
       },
     },
     storage: {
+      sql: {
+        db,
+        migrate: (ms: { up: string }[]) => {
+          for (const m of ms) db.exec(m.up);
+        },
+      },
       kv: {
         get: <T>(k: string) => kv.get(k) as T | undefined,
         set: (k: string, v: unknown) => void kv.set(k, v),
@@ -242,5 +260,7 @@ export function boot(
     for (const fn of hooks.get(name) ?? []) await fn({ payload, cancelled: false });
     await new Promise((r) => setTimeout(r, 0));
   };
-  return { impl, warns, defined, provided, kv, titles, session: (id) => sessions.get(id), fire };
+  const toolProvider = provided.find((p) => p.scope === "tools")?.impl as ToolProvider;
+  const tools = toolProvider.list({ sessionId: "s", projectId: "p", role: "owner" }) as ToolDefinition[];
+  return { impl, warns, defined, provided, kv, titles, session: (id) => sessions.get(id), tools, fire };
 }

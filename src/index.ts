@@ -2,6 +2,8 @@ import { definePlugin, defineScope } from "@valethq/sdk";
 import { createContextManager } from "./context";
 import { viewImageTool } from "./image";
 import { registerNaming } from "./naming";
+import { createSearchIndex } from "./searchIndex";
+import { sessionSearchTool, sessionViewTool } from "./sessionTools";
 import { registerSettings } from "./settings";
 
 export default definePlugin({
@@ -10,6 +12,10 @@ export default definePlugin({
     ctx.scopes.provide("context", createContextManager(ctx), { key: "valet-contextmanager" });
     registerSettings(ctx);
     registerNaming(ctx);
-    ctx.scopes.provide("tools", { list: ({ role }) => (role === "owner" ? [viewImageTool(ctx)] : []) });
+    const index = createSearchIndex(ctx);
+    ctx.scopes.provide("tools", {
+      list: ({ role }) =>
+        role === "owner" ? [viewImageTool(ctx), sessionSearchTool(ctx, index), sessionViewTool(ctx)] : [],
+    });
   },
 });
