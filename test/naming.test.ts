@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { Run, UtilityModel } from "@valethq/sdk";
 import { cleanTitle, isPlaceholder } from "../src/naming";
 import { boot, entry, project, session, text } from "./helpers";
-import type { SettingsPanel } from "../src/settings";
+import type { SettingsPanel } from "@valethq/sdk";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: "r1",
@@ -112,7 +112,8 @@ test("skips failed runs, providers without a Utility model, and the off switch",
   b.kv.set("autoNameSessions", false);
   await b.fire("run.end", { run: run() });
   expect(calls).toHaveLength(0);
-  const panel = b.provided.find((p) => p.scope === "settings")?.impl as SettingsPanel;
+  const panel = b.provided.find((p) => p.scope === "settings")?.impl as SettingsPanel &
+    Required<Pick<SettingsPanel, "set">>;
   expect(() =>
     panel.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 10, autoNameSessions: "yes" }),
   ).toThrow("autoNameSessions");

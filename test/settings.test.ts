@@ -1,11 +1,14 @@
 import { afterAll, expect, test } from "bun:test";
 import { boot, cleanup, entry, model, project, session, text, workspace } from "./helpers";
-import type { SettingsPanel } from "../src/settings";
+import type { SettingsPanel } from "@valethq/sdk";
 
 afterAll(cleanup);
 
+/** The panels under test have a form, so get and set are present. */
+type FormPanel = SettingsPanel & Required<Pick<SettingsPanel, "get" | "set">>;
+
 const panel = (b: ReturnType<typeof boot>) =>
-  b.provided.find((p) => p.scope === "settings")?.impl as SettingsPanel;
+  b.provided.find((p) => p.scope === "settings")?.impl as FormPanel;
 
 test("settings panel registers on the settings scope", () => {
   const b = boot();

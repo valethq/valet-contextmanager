@@ -1,20 +1,6 @@
 import type { PluginContext } from "@valethq/sdk";
 import { DEFAULT_CAP } from "./persona";
 
-export interface SettingsPanel {
-  title: string;
-  description?: string;
-  schema: Record<string, unknown>;
-  get(): Record<string, unknown> | Promise<Record<string, unknown>>;
-  set(values: Record<string, unknown>): void | Promise<void>;
-}
-
-declare module "@valethq/sdk" {
-  interface ValetScopes {
-    settings: SettingsPanel;
-  }
-}
-
 /** Fraction of the context window that triggers history trimming and compaction. */
 export function compactionThreshold(ctx: PluginContext): number {
   const v = ctx.storage.kv.get<number>("compactionThreshold");
