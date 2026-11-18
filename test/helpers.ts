@@ -18,6 +18,7 @@ import type {
   UtilityModel,
 } from "@valethq/sdk";
 import plugin from "../src/index";
+import type { ContextConfig } from "../src/settings";
 
 const dirs: string[] = [];
 
@@ -132,6 +133,8 @@ export interface Booted {
   fire(name: string, payload: unknown): Promise<void>;
   /** skill_read's provider (key "skills"): the tools a run in this session and role would get. */
   skillTools(sessionId: string, role: Role): Promise<ToolDefinition[]>;
+  /** What core does on a settings save: the new block replaces ctx.config. */
+  setConfig(patch: Partial<ContextConfig>): void;
 }
 
 export function boot(
@@ -141,6 +144,7 @@ export function boot(
     messages?: Record<string, { message: Message; parts: Part[] }[]>;
     inference?: Record<string, { utility?: UtilityModel }>;
     valetHome?: string;
+    config?: ContextConfig;
   } = {},
 ): Booted {
   const warns: Booted["warns"] = [];
@@ -149,13 +153,17 @@ export function boot(
   const sessions = new Map((o.sessions ?? []).map((s) => [s.id, s]));
   const projects = new Map((o.projects ?? []).map((p) => [p.id, p]));
   const kv = new Map<string, unknown>();
+  let current: ContextConfig = { ...(o.config ?? {}) };
   const messages = o.messages ?? {};
   const titles: Booted["titles"] = [];
   const hooks = new Map<string, ((e: unknown) => unknown)[]>();
   const db = new Database(":memory:");
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
-    config: {},
+    get config() {
+      return current;
+    },
+    onConfigChange() {},
     log: {
       debug() {},
       info() {},
@@ -262,7 +270,7 @@ export function boot(
     },
     signal: new AbortController().signal,
     onDispose() {},
-  } as unknown as PluginContext;
+  } as unknown as PluginContext<ContextConfig>;
   plugin.activate(ctx);
   const impl = provided[0]?.impl as ContextManager;
   const fire = async (name: string, payload: unknown) => {
@@ -274,6 +282,9 @@ export function boot(
   const skillProvider = provided.find((p) => p.scope === "tools" && p.key === "skills")?.impl as ToolProvider;
   const skillTools = async (sessionId: string, role: Role) =>
     skillProvider.list({ sessionId, projectId: "p", role });
+  const setConfig = (patch: Partial<ContextConfig>) => {
+    current = { ...current, ...patch };
+  };
   return {
     impl,
     warns,
@@ -285,5 +296,6 @@ export function boot(
     tools,
     fire,
     skillTools,
+    setConfig,
   };
 }
