@@ -6,13 +6,13 @@ import { createSearchIndex } from "./searchIndex";
 import { sessionSearchTool, sessionViewTool } from "./sessionTools";
 import { skillReadTool } from "./skillTool";
 import { loadSkills } from "./skillLoad";
-import { registerSettings } from "./settings";
+import type { ContextConfig } from "./settings";
 
-export default definePlugin({
+export default definePlugin<ContextConfig>({
   activate(ctx) {
+    ctx.onConfigChange(() => {}); // config is read from ctx.config at use, so a reload needs no action
     ctx.scopes.define(defineScope({ name: "context", version: 1, cardinality: "one" }));
     ctx.scopes.provide("context", createContextManager(ctx), { key: "valet-contextmanager" });
-    registerSettings(ctx);
     registerNaming(ctx);
     const index = createSearchIndex(ctx);
     ctx.scopes.provide("tools", {

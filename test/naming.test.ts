@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import type { Run, UtilityModel } from "@valethq/sdk";
 import { cleanTitle, isPlaceholder } from "../src/naming";
 import { boot, entry, project, session, text } from "./helpers";
-import type { SettingsPanel } from "@valethq/sdk";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: "r1",
@@ -109,14 +108,9 @@ test("skips failed runs, providers without a Utility model, and the off switch",
   await b.fire("run.end", { run: run({ status: "error" }) });
   await b.fire("run.end", { run: run({ provider: "plain" }) });
   await b.fire("run.end", { run: run({ provider: "missing" }) });
-  b.kv.set("autoNameSessions", false);
+  b.setConfig({ autoNameSessions: false });
   await b.fire("run.end", { run: run() });
   expect(calls).toHaveLength(0);
-  const panel = b.provided.find((p) => p.scope === "settings")?.impl as SettingsPanel &
-    Required<Pick<SettingsPanel, "set">>;
-  expect(() =>
-    panel.set({ compactionThreshold: 0.5, personaMaxBytesPerFile: 10, autoNameSessions: "yes" }),
-  ).toThrow("autoNameSessions");
 });
 
 test("a failing Utility model leaves the title alone and gives up after three tries", async () => {

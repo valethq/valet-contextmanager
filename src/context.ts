@@ -1,15 +1,13 @@
 import type {
   ContextManager,
-  Message,
-  ModelContent,
   ModelMessage,
-  Part,
   PartData,
   PartWriter,
   PersonaFile,
   PluginContext,
   Role,
 } from "@valethq/sdk";
+import { historyBudget, latestValetSummary, modelHistory, transcript, trimHistory } from "./history";
 import { loadPersonaFiles } from "./persona";
 import { loadSkills } from "./skillLoad";
 import { renderSkills } from "./skills";
@@ -39,64 +37,13 @@ function renderPreamble(
   return sections.join("\n\n");
 }
 
-function toModelMessage(message: Message, content: ModelContent[]): ModelMessage {
-  switch (message.role) {
-    case "assistant":
-      return { role: "assistant", content };
-    case "tool": {
-      const callId = typeof message.meta.callId === "string" ? message.meta.callId : message.id;
-      return { role: "tool", callId, content };
-    }
-    default:
-      // stored "system" messages have no ModelMessage role; they ride as user text
-      return { role: "user", content };
-  }
-}
-
-// spec-gap: file parts have no ModelContent form beyond images, so history carries a text note instead.
-function fileNote(message: Message, file: Extract<PartData, { type: "file" }>): string {
-  const verb = message.role === "assistant" ? "presented to the user" : "attached";
-  return `[${verb}: ${file.name} (${file.mime})]`;
-}
-
 const SUMMARY_HEAD = "[valet: summary of the earlier part of this chat, compacted by valet]";
-
-interface Entry {
-  message: Message;
-  parts: Part[];
-}
-interface Summary {
-  summary: string;
-  coversThroughSeq: number;
-}
-
-/** The latest completed valet summary; harness markers and failed or open compactions never replace history. */
-function latestSummary(entries: Entry[]): Summary | undefined {
-  let found: Summary | undefined;
-  for (const { parts } of entries)
-    for (const { data } of parts)
-      if (data.type === "compaction" && data.status === "completed" && data.summary !== undefined)
-        found = { summary: data.summary, coversThroughSeq: data.coversThroughSeq };
-  return found;
-}
 
 interface OpenCompaction {
   writer: PartWriter;
   messageId: string;
   by: string;
   coversThroughSeq: number;
-}
-
-/** Text of every message after `since` (seq), prefixed by the prior summary so the new one folds it in. */
-function transcript(entries: Entry[], since: Summary | undefined): string {
-  const lines: string[] = [];
-  for (const { message, parts } of entries) {
-    if (since !== undefined && message.seq <= since.coversThroughSeq) continue;
-    const texts = parts.flatMap((p) => (p.data.type === "text" ? [p.data.text] : []));
-    if (texts.length > 0) lines.push(`${message.role}: ${texts.join("\n")}`);
-  }
-  const prior = since === undefined ? [] : [`Earlier summary:\n${since.summary}`];
-  return [...prior, ...lines].join("\n\n");
 }
 
 export function createContextManager(ctx: PluginContext): ContextManager {
@@ -167,36 +114,18 @@ export function createContextManager(ctx: PluginContext): ContextManager {
       const files = await loadFiles(sessionId, role);
       const system = renderPreamble(files, renderSkills(await loadSkills(ctx, sessionId, role)), model);
       const entries = ctx.store.messages.list(sessionId);
-      const cut = latestSummary(entries);
+      const cut = latestValetSummary(entries);
       const messages: ModelMessage[] = [];
       const chars: number[] = [];
       if (cut) {
         const text = `${SUMMARY_HEAD}\n${cut.summary}`;
-        messages.push({ role: "user", content: [{ type: "text", text }] });
+        messages.push({ role: "user" as const, content: [{ type: "text" as const, text }] });
         chars.push(text.length);
       }
-      for (const { message, parts } of entries) {
-        if (message.role === "assistant" && message.runId === runId) continue;
-        if (cut && message.seq <= cut.coversThroughSeq) continue;
-        const texts = parts.flatMap(({ data }) =>
-          data.type === "text" || data.type === "custom"
-            ? [data.text]
-            : data.type === "file"
-              ? [fileNote(message, data)]
-              : [],
-        );
-        if (texts.length === 0) continue;
-        const content: ModelContent[] = texts.map((t) => ({ type: "text", text: t }));
-        messages.push(toModelMessage(message, content));
-        chars.push(texts.reduce((n, t) => n + t.length, 0));
-      }
-      let total = system.length + chars.reduce((a, b) => a + b, 0);
-      if (Number.isFinite(model.contextWindow) && model.contextWindow > 0) {
-        while (messages.length > 0 && Math.ceil(total / 4) > compactionThreshold(ctx) * model.contextWindow) {
-          messages.shift();
-          total -= chars.shift() ?? 0;
-        }
-      }
+      const history = modelHistory(entries, { runId, images: model.input.includes("image"), cut });
+      messages.push(...history.messages);
+      chars.push(...history.chars);
+      const total = trimHistory(messages, chars, system.length, historyBudget(model), cut ? 1 : 0);
       return { system, messages, estimatedTokens: Math.ceil(total / 4), files };
     },
 
@@ -218,11 +147,12 @@ export function createContextManager(ctx: PluginContext): ContextManager {
 
     async compact({ sessionId, summarize }) {
       const entries = ctx.store.messages.list(sessionId);
-      const text = transcript(entries, latestSummary(entries));
+      const text = transcript(entries, latestValetSummary(entries));
       if (text === "") throw new Error("nothing to compact yet");
       const compactionId = await start(sessionId, "valet");
       try {
-        const summary = await summarize(text);
+        const summary = (await summarize(text)).trim();
+        if (summary === "") throw new Error("compaction summary was empty");
         await end(compactionId, { status: "completed", summary });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

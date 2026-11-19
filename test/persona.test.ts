@@ -27,10 +27,7 @@ async function bootWith(dir: string, settings: Record<string, unknown> = {}) {
 describe("scope registration", () => {
   test("defines context@1 and provides it under valet-contextmanager", () => {
     const { defined, provided } = boot();
-    expect(defined).toEqual([
-      { name: "context", version: 1, cardinality: "one" },
-      { name: "settings", version: 1, cardinality: "many" },
-    ]);
+    expect(defined).toEqual([{ name: "context", version: 1, cardinality: "one" }]);
     const context = provided.find((p) => p.scope === "context");
     expect(context?.key).toBe("valet-contextmanager");
   });

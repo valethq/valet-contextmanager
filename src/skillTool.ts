@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat as fsStat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import type { ToolCall, ToolDefinition, ToolResult } from "@valethq/sdk";
 import { type Skill, findSkill, parseFrontmatter } from "./skills";
@@ -32,14 +32,30 @@ async function readInside(skill: Skill, file: string): Promise<ToolResult> {
   if (target === undefined) return fail(`No file "${file}" in skill ${skill.name}.`);
   if (target !== root && !target.startsWith(root + sep))
     return fail("That path is outside the skill directory.");
-  if (!(await stat(target)).isFile()) return fail(`"${file}" is not a file.`);
-  const bytes = await readFile(target);
-  if (bytes.subarray(0, 8000).includes(0))
+  const info = await fsStat(target);
+  if (!info.isFile()) return fail(`"${file}" is not a file.`);
+  const fileSize = info.size;
+  const chunk = new Uint8Array(
+    await Bun.file(target)
+      .slice(0, MAX_FILE_BYTES + 1)
+      .arrayBuffer(),
+  );
+  if (chunk.subarray(0, Math.min(chunk.length, 8000)).includes(0))
     return fail(`"${file}" is a binary file; use a shell tool on ${join(skill.dir, file)} instead.`);
-  const text = new TextDecoder().decode(bytes.subarray(0, MAX_FILE_BYTES));
+  const dec = new TextDecoder("utf-8", { fatal: true });
+  let end = Math.min(chunk.length, MAX_FILE_BYTES);
+  let text = "";
+  while (end > 0) {
+    try {
+      text = dec.decode(chunk.subarray(0, end));
+      break;
+    } catch {
+      end--;
+    }
+  }
   return ok(
-    bytes.length > MAX_FILE_BYTES
-      ? `${text}\n\n[truncated ${bytes.length - MAX_FILE_BYTES} bytes over the ${MAX_FILE_BYTES} byte cap]`
+    fileSize > MAX_FILE_BYTES
+      ? `${text}\n\n[truncated ${fileSize - MAX_FILE_BYTES} bytes over the ${MAX_FILE_BYTES} byte cap]`
       : text,
   );
 }

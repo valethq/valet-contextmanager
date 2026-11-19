@@ -137,9 +137,9 @@ describe("preamble", () => {
     expect(out).not.toContain("Default folder");
   });
 
-  test("the panel switch turns skills off for every project", async () => {
+  test("plugin config turns skills off for every project", async () => {
     const { b } = await setup({ "skills/alpha/SKILL.md": skill("alpha", "Does alpha.") });
-    b.kv.set("skillsEnabled", false);
+    b.setConfig({ skillsEnabled: false });
     expect(await b.impl.preamble({ sessionId: "s1", role: "owner" })).not.toContain("## Skills");
   });
 

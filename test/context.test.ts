@@ -86,8 +86,9 @@ describe("build", () => {
     ]);
   });
 
-  test("trims oldest messages over 80% of the context window", async () => {
+  test("keeps history that fits after the output reserve is clamped", async () => {
     const long = "x".repeat(100);
+    const window = 1000;
     const { impl, model: m } = await bootBuild(
       [
         entry("s1", "user", [text(long)]),
@@ -95,14 +96,18 @@ describe("build", () => {
         entry("s1", "user", [text(long)]),
         entry("s1", "assistant", [text(long)]),
       ],
-      140,
+      window,
     );
     const built = await impl.build({ sessionId: "s1", runId: "r9", model: m, role: "owner" });
-    // budget: 112 tokens = 448 chars; system ~174 chars -> ~2 messages fit
-    expect(built.messages).toHaveLength(2);
-    expect(Math.ceil((built.system.length + 200) / 4)).toBeLessThanOrEqual(112);
-    expect(built.estimatedTokens).toBeLessThanOrEqual(112);
-    expect(built.messages[0]?.role).toBe("user");
+    // maxOutputTokens is 4096, above this window. Reserve clamps to floor(window/4), so all four fit.
+    expect(m.maxOutputTokens).toBeGreaterThan(window);
+    expect(built.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: long }] },
+      { role: "assistant", content: [{ type: "text", text: long }] },
+      { role: "user", content: [{ type: "text", text: long }] },
+      { role: "assistant", content: [{ type: "text", text: long }] },
+    ]);
+    expect(built.estimatedTokens).toBeLessThanOrEqual(window - Math.floor(window / 4));
   });
 
   test("omits the context-window line when the window is unknown", async () => {
