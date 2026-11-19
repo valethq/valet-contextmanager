@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Logger, PersonaFile, Role } from "@valethq/sdk";
 import { matchPatterns } from "./patterns";
@@ -111,20 +111,36 @@ export async function loadPersonaFiles(
   const spec = personaSpec(settings, defaultCap);
   const files = await personaEntries(workspaceDir, spec, log);
   const { cap } = spec;
-  const decoder = new TextDecoder();
   const out: PersonaFile[] = [];
   for (const f of files) {
     if (ROLE_RANK[role] < ROLE_RANK[f.minRole ?? "guest"]) continue;
-    let bytes: Uint8Array;
+    const path = resolve(workspaceDir, f.path);
+    let fileSize: number;
+    let chunk: Uint8Array;
     try {
-      bytes = await readFile(resolve(workspaceDir, f.path));
+      fileSize = (await stat(path)).size;
+      chunk = new Uint8Array(
+        await Bun.file(path)
+          .slice(0, cap + 1)
+          .arrayBuffer(),
+      );
     } catch {
       continue; // missing files are skipped silently
     }
-    let content = decoder.decode(bytes.subarray(0, cap));
-    if (bytes.length > cap) {
-      content += `\n\n[valet: truncated ${bytes.length - cap} bytes over the per-file cap]`;
-      log.warn("persona file exceeds per-file cap", { path: f.path, bytes: bytes.length, cap });
+    const dec = new TextDecoder("utf-8", { fatal: true });
+    let end = Math.min(chunk.length, cap);
+    let content = "";
+    while (end > 0) {
+      try {
+        content = dec.decode(chunk.subarray(0, end));
+        break;
+      } catch {
+        end--;
+      }
+    }
+    if (fileSize > cap) {
+      content += `\n\n[valet: truncated ${fileSize - cap} bytes over the per-file cap]`;
+      log.warn("persona file exceeds per-file cap", { path: f.path, bytes: fileSize, cap });
     }
     out.push({ path: f.path, role: f.role ?? "other", content });
   }
