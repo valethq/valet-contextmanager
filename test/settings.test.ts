@@ -67,22 +67,22 @@ test("compactionThreshold drives shouldCompact", async () => {
   expect(await b.impl.shouldCompact(req)).toBe(false);
 });
 
-test("compactionThreshold drives build trimming", async () => {
+test("build trimming clamps the output reserve and ignores compactionThreshold", async () => {
   const dir = await workspace({ "AGENTS.md": "rules" });
-  const messages = [1, 2, 3].map((_i) => entry("s1", "user", [text("x".repeat(100))]));
+  const messages = [1, 2, 3].map(() => entry("s1", "user", [text("x".repeat(100))]));
   const b = boot({
     sessions: [session("s1", "p1")],
     projects: [project("p1", dir)],
     messages: { s1: messages },
   });
-  // ~105+300 chars -> ~101 tokens; threshold 0.5 of 1000 keeps everything,
-  // threshold 0.08 trims old messages.
+  // model() reserves 4096 tokens. On a 1000 window that clamps to 250, so all three messages fit.
+  const m = model(1000);
   b.setConfig({ compactionThreshold: 0.5 });
-  const wide = await b.impl.build({ sessionId: "s1", runId: "r", model: model(1000), role: "owner" });
+  const wide = await b.impl.build({ sessionId: "s1", runId: "r", model: m, role: "owner" });
   expect(wide.messages).toHaveLength(3);
   b.setConfig({ compactionThreshold: 0.08 });
-  const narrow = await b.impl.build({ sessionId: "s1", runId: "r", model: model(1000), role: "owner" });
-  expect(narrow.messages.length).toBeLessThan(3);
+  const narrow = await b.impl.build({ sessionId: "s1", runId: "r", model: m, role: "owner" });
+  expect(narrow.messages).toEqual(wide.messages);
 });
 
 test("personaMaxBytesPerFile caps default persona files", async () => {
