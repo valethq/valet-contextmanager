@@ -135,6 +135,8 @@ export interface Booted {
   skillTools(sessionId: string, role: Role): Promise<ToolDefinition[]>;
   /** What core does on a settings save: the new block replaces ctx.config. */
   setConfig(patch: Partial<ContextConfig>): void;
+  /** A project's overrides, as core's project layer would give them to ctx.configFor. */
+  setProjectConfig(projectId: string, patch: Partial<ContextConfig>): void;
 }
 
 export function boot(
@@ -154,6 +156,7 @@ export function boot(
   const projects = new Map((o.projects ?? []).map((p) => [p.id, p]));
   const kv = new Map<string, unknown>();
   let current: ContextConfig = { ...(o.config ?? {}) };
+  const projectConfig = new Map<string, Partial<ContextConfig>>();
   const messages = o.messages ?? {};
   const titles: Booted["titles"] = [];
   const hooks = new Map<string, ((e: unknown) => unknown)[]>();
@@ -163,6 +166,8 @@ export function boot(
     get config() {
       return current;
     },
+    configFor: (projectId: string) =>
+      projectConfig.has(projectId) ? { ...current, ...projectConfig.get(projectId) } : current,
     onConfigChange() {},
     log: {
       debug() {},
@@ -285,6 +290,9 @@ export function boot(
   const setConfig = (patch: Partial<ContextConfig>) => {
     current = { ...current, ...patch };
   };
+  const setProjectConfig = (projectId: string, patch: Partial<ContextConfig>) => {
+    projectConfig.set(projectId, patch);
+  };
   return {
     impl,
     warns,
@@ -297,5 +305,6 @@ export function boot(
     fire,
     skillTools,
     setConfig,
+    setProjectConfig,
   };
 }

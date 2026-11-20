@@ -98,7 +98,13 @@ export function createContextManager(ctx: PluginContext): ContextManager {
     if (!session) throw new Error(`valet-contextmanager: unknown session "${sessionId}"`);
     const project = ctx.store.projects.get(session.projectId);
     if (!project) throw new Error(`valet-contextmanager: unknown project "${session.projectId}"`);
-    return loadPersonaFiles(project.workspaceDir, project.settings, role, ctx.log, personaCap(ctx));
+    return loadPersonaFiles(
+      project.workspaceDir,
+      project.settings,
+      role,
+      ctx.log,
+      personaCap(ctx, project.id),
+    );
   }
 
   return {
