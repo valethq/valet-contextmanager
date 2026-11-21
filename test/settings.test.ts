@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PluginContext } from "@valethq/sdk";
+import type { PluginContext, Setting } from "@valethq/sdk";
 import {
   autoNameSessions,
   type ContextConfig,
@@ -14,16 +14,19 @@ import { boot, cleanup, entry, model, project, session, text, workspace } from "
 afterAll(cleanup);
 
 const manifest = JSON.parse(readFileSync(join(import.meta.dir, "..", "manifest.json"), "utf8"));
-const props = manifest.configSchema.properties as Record<string, { default?: unknown }>;
+const settings = (manifest.settings.sections.system.subsections as { items: Setting[] }[]).flatMap(
+  (s) => s.items,
+);
+const props = Object.fromEntries(settings.map((s) => [s.id, { default: s.input.default, scopes: s.scopes }]));
 
 function ctxWith(config: ContextConfig): PluginContext<ContextConfig> {
-  return { config } as PluginContext<ContextConfig>;
+  return { config, configFor: () => config } as unknown as PluginContext<ContextConfig>;
 }
 
 describe("settings are config", () => {
-  test("manifest declares configSchema and no longer provides settings@1", () => {
+  test("manifest declares a settings doc under system and provides no settings scope", () => {
     expect(manifest.provides).toEqual(["context@1", "tools@1"]);
-    expect(manifest.configSchema["x-group"]).toBe("system");
+    expect(manifest.settings.sections.system.icon).toBe("layers");
     expect(Object.keys(props).sort()).toEqual([
       "autoNameSessions",
       "compactionThreshold",
@@ -35,7 +38,8 @@ describe("settings are config", () => {
   test("accessors fall back to the same defaults the manifest declares", () => {
     const ctx = ctxWith({});
     expect(compactionThreshold(ctx)).toBe(props.compactionThreshold?.default as number);
-    expect(personaCap(ctx)).toBe(props.personaMaxBytesPerFile?.default as number);
+    expect(personaCap(ctx)).toBe(64 * 1024);
+    expect(props.personaMaxBytesPerFile?.default).toBe("64 KiB");
     expect(autoNameSessions(ctx)).toBe(props.autoNameSessions?.default as boolean);
     expect(skillsEnabled(ctx)).toBe(props.skillsEnabled?.default as boolean);
   });
@@ -94,4 +98,39 @@ test("personaMaxBytesPerFile caps default persona files", async () => {
   b.setConfig({ personaMaxBytesPerFile: 100 });
   const out = await b.impl.preamble({ sessionId: "s1", role: "owner", model: model(1000) });
   expect(out).toContain("truncated 100 bytes");
+});
+
+describe("project layer", () => {
+  test("persona cap and skills are the only settings a project may override", () => {
+    expect(settings.filter((s) => s.scopes?.includes("project")).map((s) => s.id)).toEqual([
+      "personaMaxBytesPerFile",
+      "skillsEnabled",
+    ]);
+  });
+
+  test("a project override is read through configFor; the older project.settings keys still win", async () => {
+    const big = "y".repeat(200);
+    const a = await workspace({ "AGENTS.md": big });
+    const b = await workspace({ "AGENTS.md": big });
+    const booted = boot({
+      sessions: [session("s1", "p1"), session("s2", "p2")],
+      projects: [project("p1", a), project("p2", b, { persona: { maxBytesPerFile: 150 } })],
+    });
+    booted.setProjectConfig("p1", { personaMaxBytesPerFile: 100 });
+    booted.setProjectConfig("p2", { personaMaxBytesPerFile: 100 });
+    const one = await booted.impl.preamble({ sessionId: "s1", role: "owner", model: model(1000) });
+    expect(one).toContain("truncated 100 bytes");
+    const two = await booted.impl.preamble({ sessionId: "s2", role: "owner", model: model(1000) });
+    expect(two).toContain("truncated 50 bytes");
+  });
+
+  test("a project can turn skills off", () => {
+    const ctx = {
+      config: { skillsEnabled: true },
+      configFor: (id: string) => (id === "p1" ? { skillsEnabled: false } : { skillsEnabled: true }),
+    } as unknown as PluginContext<ContextConfig>;
+    expect(skillsEnabled(ctx, "p1")).toBe(false);
+    expect(skillsEnabled(ctx, "p2")).toBe(true);
+    expect(skillsEnabled(ctx)).toBe(true);
+  });
 });

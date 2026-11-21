@@ -1,7 +1,7 @@
 import type { PluginContext } from "@valethq/sdk";
 import { DEFAULT_CAP } from "./persona";
 
-/** Plugin config (manifest configSchema). Core fills defaults; fallbacks cover tests without a schema layer. */
+/** Plugin config (manifest settings doc). Core fills defaults; fallbacks cover tests without a schema layer. */
 export interface ContextConfig {
   compactionThreshold?: number;
   personaMaxBytesPerFile?: number;
@@ -9,8 +9,9 @@ export interface ContextConfig {
   skillsEnabled?: boolean;
 }
 
-function cfg(ctx: PluginContext): ContextConfig {
-  return (ctx.config ?? {}) as ContextConfig;
+/** The user block, or a project's view of it when the project overrides a setting (12.1 project layer). */
+function cfg(ctx: PluginContext, projectId?: string): ContextConfig {
+  return ((projectId === undefined ? ctx.config : ctx.configFor(projectId)) ?? {}) as ContextConfig;
 }
 
 /** Fraction of the context window that triggers history trimming and compaction. */
@@ -19,9 +20,9 @@ export function compactionThreshold(ctx: PluginContext): number {
   return typeof v === "number" && v > 0 && v <= 1 ? v : 0.8;
 }
 
-/** Default per-file byte cap for persona files; project settings still win. */
-export function personaCap(ctx: PluginContext): number {
-  const v = cfg(ctx).personaMaxBytesPerFile;
+/** Default per-file byte cap for persona files; the older `project.settings.persona.maxBytesPerFile` still wins. */
+export function personaCap(ctx: PluginContext, projectId?: string): number {
+  const v = cfg(ctx, projectId).personaMaxBytesPerFile;
   return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : DEFAULT_CAP;
 }
 
@@ -31,8 +32,8 @@ export function autoNameSessions(ctx: PluginContext): boolean {
   return typeof v === "boolean" ? v : true;
 }
 
-/** Whether the preamble lists skills and skill_read is offered. On by default; a project can still opt out. */
-export function skillsEnabled(ctx: PluginContext): boolean {
-  const v = cfg(ctx).skillsEnabled;
+/** Whether the preamble lists skills and skill_read is offered. On by default; `project.settings.skills` still wins. */
+export function skillsEnabled(ctx: PluginContext, projectId?: string): boolean {
+  const v = cfg(ctx, projectId).skillsEnabled;
   return typeof v === "boolean" ? v : true;
 }

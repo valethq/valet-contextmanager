@@ -7,39 +7,68 @@
   "valet": "^0.1.0",
   "main": "./src/index.ts",
   "provides": ["context@1", "tools@1"],
-  "configSchema": {
-    "type": "object",
-    "additionalProperties": false,
-    "x-group": "system",
-    "x-icon": "layers",
-    "x-order": 10,
-    "properties": {
-      "compactionThreshold": {
-        "type": "number",
-        "title": "Compaction threshold",
-        "description": "Fraction of the model's context window (0-1) that triggers trimming and compaction.",
-        "exclusiveMinimum": 0,
-        "maximum": 1,
-        "default": 0.8
-      },
-      "personaMaxBytesPerFile": {
-        "type": "integer",
-        "title": "Persona byte cap",
-        "description": "Max bytes read per persona file when the project doesn't set maxBytesPerFile.",
-        "minimum": 1,
-        "default": 65536
-      },
-      "autoNameSessions": {
-        "type": "boolean",
-        "title": "Name sessions automatically",
-        "description": "After a session's first reply, title it with the provider's Utility model (set in the provider's own settings).",
-        "default": true
-      },
-      "skillsEnabled": {
-        "type": "boolean",
-        "title": "Skills",
-        "description": "List skills (<workspace>/skills and ~/.valet/skills, SKILL.md files) in the preamble and offer skill_read. A project's settings.skills can turn them off or change the folders.",
-        "default": true
+  "settings": {
+    "sections": {
+      "system": {
+        "subsections": [
+          {
+            "id": "context",
+            "label": "Context",
+            "items": [
+              {
+                "id": "compactionThreshold",
+                "label": "Compaction threshold",
+                "summary": "Share of the model's context window that triggers trimming and compaction.",
+                "input": {
+                  "type": "percent",
+                  "exclusiveMin": 0,
+                  "max": 1,
+                  "step": 0.05,
+                  "style": "slider",
+                  "default": 0.8
+                }
+              },
+              {
+                "id": "personaMaxBytesPerFile",
+                "label": "Persona byte cap",
+                "summary": "Max bytes read per persona file. A project can set its own.",
+                "input": {
+                  "type": "bytes",
+                  "min": 1,
+                  "default": "64 KiB"
+                },
+                "scopes": ["user", "project"]
+              }
+            ]
+          },
+          {
+            "id": "sessions",
+            "label": "Sessions",
+            "items": [
+              {
+                "id": "autoNameSessions",
+                "label": "Name sessions automatically",
+                "summary": "After a session's first reply, title it with the provider's Utility model (set in the provider's own settings).",
+                "input": {
+                  "type": "bool",
+                  "default": true
+                }
+              },
+              {
+                "id": "skillsEnabled",
+                "label": "Skills",
+                "summary": "List skills (<workspace>/skills and ~/.valet/skills, SKILL.md files) in the preamble and offer skill_read. A project can turn them off.",
+                "input": {
+                  "type": "bool",
+                  "default": true
+                },
+                "scopes": ["user", "project"]
+              }
+            ]
+          }
+        ],
+        "icon": "layers",
+        "order": 10
       }
     }
   }
