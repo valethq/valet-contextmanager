@@ -191,25 +191,21 @@ export function createSearchIndex(ctx: PluginContext): SearchIndex {
               snippet(${FTS}, 0, '[[', ']]', '...', 24) AS snippet
        FROM ${FTS} JOIN p_contextmanager_msgs AS m ON m.id = ${FTS}.rowid
        WHERE ${where.join(" AND ")}
-       ORDER BY ${FTS}.rank LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
+       ORDER BY ${FTS}.rank`,
     );
+    // Stream one ranked scan so denied hits never restart the query; the first `limit` allowed hits end it.
     const hits: SearchHit[] = [];
-    const page = q.allow ? Math.max(q.limit, 64) : q.limit;
-    for (let offset = 0; hits.length < q.limit; offset += page) {
-      const rows = stmt.all(...params, page, offset);
-      for (const r of rows) {
-        if (!q.allow || q.allow(r.session_id))
-          hits.push({
-            messageId: r.message_id,
-            sessionId: r.session_id,
-            seq: r.seq,
-            role: r.role,
-            createdAt: r.created_at,
-            snippet: r.snippet,
-          });
-        if (hits.length >= q.limit) break;
-      }
-      if (rows.length < page) break;
+    for (const r of stmt.iterate(...params)) {
+      if (!q.allow || q.allow(r.session_id))
+        hits.push({
+          messageId: r.message_id,
+          sessionId: r.session_id,
+          seq: r.seq,
+          role: r.role,
+          createdAt: r.created_at,
+          snippet: r.snippet,
+        });
+      if (hits.length >= q.limit) break;
     }
     return hits;
   }

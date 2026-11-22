@@ -33,7 +33,11 @@ const names = (tools: ToolDefinition[]) => tools.map((t) => t.name);
 function setup(policy?: PolicyProvider) {
   const messages = {
     s1: [entry("s1", "user", [text("renew the coturn certificate")])],
-    s2: [entry("s2", "user", [text("coturn secrets live in project two")])],
+    s2: [
+      // Repeated term + both query words: denied hits must outrank s1's and match the all-word query.
+      entry("s2", "user", [text("coturn coturn coturn zebra secrets live in project two")]),
+      entry("s2", "assistant", [text("more coturn for the denied session")]),
+    ],
   };
   return boot({
     sessions: [session("s1", "p1"), session("s2", "p2")],
