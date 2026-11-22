@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PluginContext, ToolCall } from "@valethq/sdk";
+import type { ToolCall } from "@valethq/sdk";
 import { loadPersonaFiles } from "../src/persona";
 import { viewImageTool } from "../src/image";
 import { skillReadTool } from "../src/skillTool";
 import type { Skill } from "../src/skills";
-import { cleanup, workspace } from "./helpers";
+import { aclCtx, caller, cleanup, workspace } from "./helpers";
 
 afterAll(cleanup);
 
@@ -23,18 +23,16 @@ describe("light fixes", () => {
     await writeFile(join(dir, "fake.png"), "not an image");
     await writeFile(join(dir, "real.png"), PNG);
     const puts: unknown[] = [];
-    const ctx = {
-      store: {
-        blobs: {
-          put: async (b: Uint8Array, m: unknown) => {
-            puts.push(m);
-            return { id: "b1" };
-          },
+    const ctx = aclCtx({
+      blobs: {
+        put: async (_b: Uint8Array, m: unknown) => {
+          puts.push(m);
+          return { id: "b1" };
         },
       },
-    } as unknown as PluginContext;
+    });
     const tool = viewImageTool(ctx);
-    const call = { cwd: dir, role: "owner" } as ToolCall;
+    const call = { cwd: dir, role: "owner", caller: caller() } as ToolCall;
     expect((await tool.invoke({ path: "fake.png" }, call)).isError).toBe(true);
     expect(puts).toHaveLength(0);
     const ok = await tool.invoke({ path: "real.png" }, call);
@@ -75,8 +73,8 @@ describe("light fixes", () => {
     const skills = async (): Promise<Skill[]> => [
       { name: "s", dir: skillDir, description: "d", minRole: "guest", source: "project" },
     ];
-    const tool = skillReadTool(skills);
-    const call = { cwd: dir, role: "owner" } as ToolCall;
+    const tool = skillReadTool(aclCtx(), skills);
+    const call = { cwd: dir, role: "owner", caller: caller() } as ToolCall;
     const res = await tool.invoke({ name: "s", file: "note.md" }, call);
     expect(res.isError).toBeUndefined();
     const out = res.content.map((c) => ("text" in c ? c.text : "")).join("");

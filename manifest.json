@@ -7,6 +7,14 @@
   "valet": "^0.1.0",
   "main": "./src/index.ts",
   "provides": ["context@1", "tools@1"],
+  "acl": {
+    "permissions": {
+      "image.view": { "summary": "View images from the workspace", "default": "owner" },
+      "session.search": { "summary": "Search past sessions", "default": "owner" },
+      "session.read": { "summary": "Read past sessions", "default": "owner" },
+      "skill.read": { "summary": "Read skills", "default": "guest" }
+    }
+  },
   "settings": {
     "sections": {
       "system": {

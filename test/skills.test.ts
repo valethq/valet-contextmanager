@@ -3,7 +3,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ToolCall, ToolDefinition } from "@valethq/sdk";
 import { parseFrontmatter } from "../src/skills";
-import { boot, cleanup, model, project, session, workspace } from "./helpers";
+import { boot, caller, cleanup, model, project, session, workspace } from "./helpers";
 
 afterAll(cleanup);
 
@@ -31,6 +31,7 @@ const call = (role: ToolCall["role"] = "owner"): ToolCall =>
     runId: "r",
     callId: "c",
     role,
+    caller: caller(),
     cwd: "/",
     signal: new AbortController().signal,
   }) as ToolCall;

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { extname, resolve } from "node:path";
-import type { PluginContext, ToolDefinition } from "@valethq/sdk";
+import { defineTool, type PluginContext, type ToolDefinition } from "@valethq/sdk";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MIME: Record<string, string> = {
@@ -44,11 +44,12 @@ function sniffImageMime(bytes: Uint8Array): string | null {
 }
 
 export function viewImageTool(ctx: PluginContext): ToolDefinition<ViewImageInput> {
-  return {
+  const def: ToolDefinition<ViewImageInput> = {
     name: "view_image",
     description:
       "Look at an image file on disk (png, jpeg, gif, webp, up to 8 MB). The image comes back as image content, so use this to inspect screenshots and generated pictures. Small pixel art is easier to read if you upscale it first.",
     minRole: "owner",
+    permission: "contextmanager:image.view",
     inputSchema: {
       type: "object",
       required: ["path"],
@@ -57,7 +58,6 @@ export function viewImageTool(ctx: PluginContext): ToolDefinition<ViewImageInput
       },
     },
     async invoke(input, call) {
-      if (call.role !== "owner") return fail("view_image is only available to the owner.");
       if (typeof input?.path !== "string" || !input.path.trim()) return fail("view_image needs a path.");
       const p = input.path.startsWith("~/") ? homedir() + input.path.slice(1) : resolve(call.cwd, input.path);
       const mime = MIME[extname(p).toLowerCase()];
@@ -77,4 +77,5 @@ export function viewImageTool(ctx: PluginContext): ToolDefinition<ViewImageInput
       };
     },
   };
+  return defineTool(def, ctx);
 }

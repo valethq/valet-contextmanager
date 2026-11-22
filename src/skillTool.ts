@@ -1,6 +1,12 @@
 import { readFile, readdir, realpath, stat as fsStat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
-import type { ToolCall, ToolDefinition, ToolResult } from "@valethq/sdk";
+import {
+  type AclContext,
+  defineTool,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolResult,
+} from "@valethq/sdk";
 import { type Skill, findSkill, parseFrontmatter } from "./skills";
 
 const MAX_FILE_BYTES = 65536;
@@ -66,12 +72,16 @@ interface Input {
 }
 
 /** `skills` is re-evaluated on every call, so edits to SKILL.md apply without a restart. */
-export function skillReadTool(skills: (call: ToolCall) => Promise<Skill[]>): ToolDefinition<Input> {
-  return {
+export function skillReadTool(
+  ctx: AclContext,
+  skills: (call: ToolCall) => Promise<Skill[]>,
+): ToolDefinition<Input> {
+  const def: ToolDefinition<Input> = {
     name: "skill_read",
     description:
       "Load a skill listed in your instructions. Returns the skill's SKILL.md and the files bundled with it. Pass `file` to read one of those files instead.",
     minRole: "guest",
+    permission: "contextmanager:skill.read",
     inputSchema: {
       type: "object",
       required: ["name"],
@@ -102,4 +112,5 @@ export function skillReadTool(skills: (call: ToolCall) => Promise<Skill[]>): Too
       );
     },
   };
+  return defineTool(def, ctx);
 }
