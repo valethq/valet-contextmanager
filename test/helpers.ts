@@ -196,6 +196,8 @@ export function boot(
     valetHome?: string;
     config?: ContextConfig;
     policy?: PolicyProvider;
+    /** Run ids a tool or context call is stamped with, and the caller each resolves to. */
+    runCallers?: Record<string, Caller>;
   } = {},
 ): Booted {
   const warns: Booted["warns"] = [];
@@ -266,6 +268,13 @@ export function boot(
         },
       },
       projects: { get: (id: string) => projects.get(id) },
+      runs: {
+        caller: (runId: string) => {
+          const who = o.runCallers?.[runId];
+          if (!who) throw new Error(`unknown run "${runId}"`);
+          return who;
+        },
+      },
       messages: {
         list: (sessionId: string, q: { beforeSeq?: number; limit?: number } = {}) => {
           const all = (messages[sessionId] ?? []).filter(

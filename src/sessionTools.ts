@@ -54,13 +54,22 @@ export function sessionSearchTool(ctx: PluginContext, index: SearchIndex): ToolD
       if (typeof input?.query !== "string" || !input.query.trim())
         return fail("session_search needs a query.");
       await index.ready;
-      const found = index.search({
+      const seen = new Map<string, boolean>();
+      const allow = (sessionId: string) => {
+        let ok = seen.get(sessionId);
+        if (ok === undefined) {
+          ok = mayRead(ctx, call, sessionId);
+          seen.set(sessionId, ok);
+        }
+        return ok;
+      };
+      const hits = index.search({
         query: input.query,
         limit: intIn(input.limit, 10, 1, 30),
         sessionId: typeof input.sessionId === "string" ? input.sessionId : undefined,
         projectId: typeof input.projectId === "string" ? input.projectId : undefined,
+        allow,
       });
-      const hits = found.filter((h) => mayRead(ctx, call, h.sessionId));
       if (hits.length === 0) return ok(`No sessions match "${input.query}".`);
       const lines = hits.map((h, i) => {
         const title = ctx.store.sessions.get(h.sessionId)?.title ?? "untitled";

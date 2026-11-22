@@ -7,6 +7,7 @@ import type {
   PluginContext,
   Role,
 } from "@valethq/sdk";
+import { can, sessionResource } from "@valethq/sdk";
 import { historyBudget, latestValetSummary, modelHistory, transcript, trimHistory } from "./history";
 import { loadPersonaFiles } from "./persona";
 import { loadSkills } from "./skillLoad";
@@ -38,6 +39,22 @@ function renderPreamble(
 }
 
 const SUMMARY_HEAD = "[valet: summary of the earlier part of this chat, compacted by valet]";
+
+// Telling the model to call skill_read when its caller cannot pass the permission
+// advertises a tool that is not in its set. preamble() has no run to check, so it
+// keeps role-based listing; spec-gap: the context@1 preamble signature carries no caller.
+function mayReadSkills(ctx: PluginContext, sessionId: string, runId: string): boolean {
+  try {
+    return can(
+      ctx,
+      ctx.store.runs.caller(runId),
+      "contextmanager:skill.read",
+      sessionResource(ctx, sessionId),
+    ).allow;
+  } catch {
+    return true;
+  }
+}
 
 interface OpenCompaction {
   writer: PartWriter;
@@ -118,7 +135,10 @@ export function createContextManager(ctx: PluginContext): ContextManager {
 
     async build({ sessionId, runId, model, role }) {
       const files = await loadFiles(sessionId, role);
-      const system = renderPreamble(files, renderSkills(await loadSkills(ctx, sessionId, role)), model);
+      const skills = mayReadSkills(ctx, sessionId, runId)
+        ? renderSkills(await loadSkills(ctx, sessionId, role))
+        : "";
+      const system = renderPreamble(files, skills, model);
       const entries = ctx.store.messages.list(sessionId);
       const cut = latestValetSummary(entries);
       const messages: ModelMessage[] = [];

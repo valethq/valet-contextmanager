@@ -1,7 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Caller, PolicyProvider, ToolCall, ToolDefinition, ToolResult } from "@valethq/sdk";
 import manifest from "../manifest.json";
-import { boot, caller, cleanup, entry, generousPolicy, project, session, text, workspace } from "./helpers";
+import {
+  boot,
+  caller,
+  cleanup,
+  entry,
+  generousPolicy,
+  model,
+  project,
+  session,
+  text,
+  workspace,
+} from "./helpers";
 
 afterAll(cleanup);
 
@@ -140,10 +151,24 @@ describe("session resources", () => {
     expect(out(r)).toContain("s1");
     expect(out(r)).not.toContain("s2");
   });
+
+  test("denied sessions do not spend the limit or block the any-word fallback", async () => {
+    const b = setup(noSecondProject);
+    const search = b.tools.find((t) => t.name === "session_search") as ToolDefinition<{
+      query: string;
+      limit?: number;
+    }>;
+    const one = await search.invoke({ query: "coturn", limit: 1 }, call(caller()));
+    expect(out(one)).toContain("s1");
+    expect(out(one)).not.toContain("s2");
+    const fallback = await search.invoke({ query: "coturn zebra" }, call(caller()));
+    expect(out(fallback)).toContain("s1");
+    expect(out(fallback)).not.toContain("s2");
+  });
 });
 
 describe("skill_read", () => {
-  async function withSkill(policy?: PolicyProvider) {
+  async function withSkill(policy?: PolicyProvider, runCallers?: Record<string, Caller>) {
     const dir = await workspace({
       "skills/alpha/SKILL.md": "---\nname: alpha\ndescription: d\nminRole: guest\n---\n\nBody.\n",
     });
@@ -151,6 +176,7 @@ describe("skill_read", () => {
       sessions: [session("s1", "p1")],
       projects: [project("p1", dir)],
       ...(policy && { policy }),
+      ...(runCallers && { runCallers }),
     });
   }
 
@@ -182,5 +208,29 @@ describe("skill_read", () => {
     );
     expect(r.isError).toBe(true);
     expect(out(r)).toContain("skill_read denied");
+  });
+
+  test("build does not advertise skills to a run whose caller lacks skill.read", async () => {
+    const noSkillForPal: PolicyProvider = {
+      check: (subject, permission) =>
+        permission === "contextmanager:skill.read" && subject.principalId === "pal"
+          ? { allow: false, by: "valet-policy", reason: "no skills for pal" }
+          : { allow: true },
+    };
+    const b = await withSkill(noSkillForPal, { r1: caller("pal"), r2: caller("boss") });
+    const denied = await b.impl.build({
+      sessionId: "s1",
+      runId: "r1",
+      model: model(1_000_000),
+      role: "trusted",
+    });
+    expect(denied.system).not.toContain("alpha");
+    const allowed = await b.impl.build({
+      sessionId: "s1",
+      runId: "r2",
+      model: model(1_000_000),
+      role: "owner",
+    });
+    expect(allowed.system).toContain("alpha");
   });
 });
