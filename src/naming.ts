@@ -1,5 +1,6 @@
 import type { Part, PluginContext, Session } from "@valethq/sdk";
 import { autoNameSessions } from "./settings";
+import { placeholderPatch } from "./title";
 
 const SYSTEM =
   "Write a title for this chat in 3 to 6 words, in the language the user wrote in. No quotes, no markdown, no trailing punctuation. Reply with the title only.";
@@ -25,7 +26,7 @@ export function cleanTitle(raw: string): string | null {
   return line.slice(0, cut > 0 ? cut : MAX_TITLE);
 }
 
-/** True while nobody has retitled the session: no title yet, or still the placeholder valet-agent recorded for it. */
+/** True while the session is untitled or still has its first-message title. */
 export function isPlaceholder(session: Session): boolean {
   return session.title === null || session.title === session.settings.titlePlaceholder;
 }
@@ -34,6 +35,35 @@ export function registerNaming(ctx: PluginContext): void {
   const inFlight = new Set<string>();
   const doneKey = (id: string) => `named:${id}`;
   const failKey = (id: string) => `nameFailures:${id}`;
+
+  async function setPlaceholder(id: string, parts: Part[]): Promise<void> {
+    const session = ctx.store.sessions.get(id);
+    if (session?.title !== null) return;
+    const patch = placeholderPatch(session, textOf(parts));
+    if (patch) await ctx.store.sessions.update(id, patch);
+  }
+
+  // spec-gap: §8.4 assigns placeholder titles to the agent. The context manager owns both naming steps.
+  ctx.events.after("message.create", async ({ cancelled, payload: { message, parts } }) => {
+    if (!cancelled && message.role === "user" && message.status === "complete") {
+      await setPlaceholder(message.sessionId, parts);
+    }
+  });
+
+  ctx.events.after("core.ready", () => {
+    void (async () => {
+      for (const session of ctx.store.sessions.list({})) {
+        if (ctx.signal.aborted) return;
+        if (session.title !== null) continue;
+        try {
+          const first = ctx.store.messages.list(session.id).find(({ message }) => message.role === "user");
+          if (first) await setPlaceholder(session.id, first.parts);
+        } catch (error) {
+          ctx.log.warn("session title backfill failed", { sessionId: session.id, error: String(error) });
+        }
+      }
+    })().catch((error) => ctx.log.warn("session title backfill failed", { error: String(error) }));
+  });
 
   async function name(session: Session, provider: string): Promise<void> {
     const utility = ctx.scopes.maybe("inference", provider)?.utility;

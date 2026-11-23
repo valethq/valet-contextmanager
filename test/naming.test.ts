@@ -31,7 +31,7 @@ function utility(reply: string | Error = "Fixing Caddy Restart Loop") {
   return { u, calls };
 }
 
-/** `placeholder` is the title valet-agent recorded in the session settings; null means a person set the title. */
+/** `placeholder` is the first-message title recorded in the session settings; null means a person set the title. */
 function chat(
   title: string | null,
   placeholder: string | null = null,
@@ -65,6 +65,46 @@ test("isPlaceholder is true for no title or the recorded placeholder, never for 
     false,
   );
   expect(isPlaceholder({ ...s, title: "Homelab work" })).toBe(false);
+});
+
+test("titles an empty session from the first usable user message", async () => {
+  const s = { ...session("s1", "p1"), settings: { persona: "p" } };
+  const b = boot({ sessions: [s], config: { autoNameSessions: false } });
+  await b.fire("session.create", { session: s });
+  await b.fire("message.create", entry("s1", "system", [text("system notice")]));
+  await b.fire("message.create", entry("s1", "user", [text("/model fake:m")]));
+  await b.fire("message.create", entry("s1", "user", [text("draft")], { status: "streaming" }));
+  expect(b.session("s1")?.title).toBeNull();
+
+  await b.fire("message.create", entry("s1", "user", [text("## Please summarize this document")]));
+  await b.fire("message.create", entry("s1", "user", [text("Now something completely different")]));
+  expect(b.titles).toEqual([{ id: "s1", title: "Please summarize this document" }]);
+  expect(b.session("s1")?.settings).toEqual({
+    persona: "p",
+    titlePlaceholder: "Please summarize this document",
+  });
+});
+
+test("preserves a title supplied at session creation", async () => {
+  const s = { ...session("s1", "p1"), title: "My notes" };
+  const b = boot({ sessions: [s] });
+  await b.fire("message.create", entry("s1", "user", [text("Please summarize this document")]));
+  expect(b.session("s1")?.title).toBe("My notes");
+  expect(b.titles).toEqual([]);
+});
+
+test("backfills an untitled session from its oldest user message at startup", async () => {
+  const s = session("s1", "p1");
+  const b = boot({
+    sessions: [s],
+    messages: {
+      s1: Array.from({ length: 25 }, (_, i) =>
+        entry("s1", i % 2 === 0 ? "user" : "assistant", [text(`line ${i + 1}`)]),
+      ),
+    },
+  });
+  await b.fire("core.ready", {});
+  expect(b.titles).toEqual([{ id: "s1", title: "line 1" }]);
 });
 
 test("names a session with the run provider's Utility model after its first run", async () => {
