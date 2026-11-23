@@ -35,6 +35,8 @@ export interface SearchQuery {
   limit: number;
   sessionId?: string;
   projectId?: string;
+  /** Sessions this returns false for never appear in hits; they do not count toward the limit. */
+  allow?: (sessionId: string) => boolean;
 }
 
 export interface SearchIndex {
@@ -171,36 +173,41 @@ export function createSearchIndex(ctx: PluginContext): SearchIndex {
 
   function run(match: string, q: SearchQuery): SearchHit[] {
     const where = [`${FTS} MATCH ?1`];
-    const params: (string | number)[] = [match, q.limit];
+    const params: (string | number)[] = [match];
     if (q.sessionId) where.push(`m.session_id = ?${params.push(q.sessionId)}`);
     if (q.projectId) where.push(`m.project_id = ?${params.push(q.projectId)}`);
-    return db
-      .query<
-        {
-          message_id: string;
-          session_id: string;
-          seq: number;
-          role: string;
-          created_at: number;
-          snippet: string;
-        },
-        (string | number)[]
-      >(
-        `SELECT m.message_id, m.session_id, m.seq, m.role, m.created_at,
-                snippet(${FTS}, 0, '[[', ']]', '...', 24) AS snippet
-         FROM ${FTS} JOIN p_contextmanager_msgs AS m ON m.id = ${FTS}.rowid
-         WHERE ${where.join(" AND ")}
-         ORDER BY ${FTS}.rank LIMIT ?2`,
-      )
-      .all(...params)
-      .map((r) => ({
-        messageId: r.message_id,
-        sessionId: r.session_id,
-        seq: r.seq,
-        role: r.role,
-        createdAt: r.created_at,
-        snippet: r.snippet,
-      }));
+    const stmt = db.query<
+      {
+        message_id: string;
+        session_id: string;
+        seq: number;
+        role: string;
+        created_at: number;
+        snippet: string;
+      },
+      (string | number)[]
+    >(
+      `SELECT m.message_id, m.session_id, m.seq, m.role, m.created_at,
+              snippet(${FTS}, 0, '[[', ']]', '...', 24) AS snippet
+       FROM ${FTS} JOIN p_contextmanager_msgs AS m ON m.id = ${FTS}.rowid
+       WHERE ${where.join(" AND ")}
+       ORDER BY ${FTS}.rank`,
+    );
+    // Stream one ranked scan so denied hits never restart the query; the first `limit` allowed hits end it.
+    const hits: SearchHit[] = [];
+    for (const r of stmt.iterate(...params)) {
+      if (!q.allow || q.allow(r.session_id))
+        hits.push({
+          messageId: r.message_id,
+          sessionId: r.session_id,
+          seq: r.seq,
+          role: r.role,
+          createdAt: r.created_at,
+          snippet: r.snippet,
+        });
+      if (hits.length >= q.limit) break;
+    }
+    return hits;
   }
 
   return {

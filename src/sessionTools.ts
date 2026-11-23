@@ -1,10 +1,21 @@
-import type { PluginContext, ToolCall, ToolDefinition, ToolResult } from "@valethq/sdk";
+import {
+  can,
+  defineTool,
+  type PluginContext,
+  sessionResource,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolResult,
+} from "@valethq/sdk";
 import type { SearchIndex } from "./searchIndex";
 import { viewSession } from "./sessionView";
 
 const fail = (text: string): ToolResult => ({ content: [{ type: "text", text }], isError: true });
 const ok = (text: string): ToolResult => ({ content: [{ type: "text", text }] });
-const OWNER_ONLY = "This tool is only available to the owner.";
+
+// spec-gap: the doc does not scope reads of other sessions; each result is checked against its own session resource.
+const mayRead = (ctx: PluginContext, call: ToolCall, sessionId: string) =>
+  can(ctx, call.caller, "contextmanager:session.read", sessionResource(ctx, sessionId)).allow;
 
 function intIn(v: unknown, fallback: number, min: number, max: number): number {
   return typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.trunc(v))) : fallback;
@@ -20,11 +31,12 @@ interface SearchInput {
 }
 
 export function sessionSearchTool(ctx: PluginContext, index: SearchIndex): ToolDefinition<SearchInput> {
-  return {
+  const def: ToolDefinition<SearchInput> = {
     name: "session_search",
     description:
       "Full-text search across the owner's past chat sessions (every project): messages, compaction summaries and attached file names. Use it to find an earlier conversation, decision or command before continuing the work. Results are ranked and show the session id and message number; open one with session_view.",
     minRole: "owner",
+    permission: "contextmanager:session.search",
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -39,15 +51,24 @@ export function sessionSearchTool(ctx: PluginContext, index: SearchIndex): ToolD
       },
     },
     async invoke(input, call: ToolCall) {
-      if (call.role !== "owner") return fail(OWNER_ONLY);
       if (typeof input?.query !== "string" || !input.query.trim())
         return fail("session_search needs a query.");
       await index.ready;
+      const seen = new Map<string, boolean>();
+      const allow = (sessionId: string) => {
+        let ok = seen.get(sessionId);
+        if (ok === undefined) {
+          ok = mayRead(ctx, call, sessionId);
+          seen.set(sessionId, ok);
+        }
+        return ok;
+      };
       const hits = index.search({
         query: input.query,
         limit: intIn(input.limit, 10, 1, 30),
         sessionId: typeof input.sessionId === "string" ? input.sessionId : undefined,
         projectId: typeof input.projectId === "string" ? input.projectId : undefined,
+        allow,
       });
       if (hits.length === 0) return ok(`No sessions match "${input.query}".`);
       const lines = hits.map((h, i) => {
@@ -60,6 +81,7 @@ export function sessionSearchTool(ctx: PluginContext, index: SearchIndex): ToolD
       );
     },
   };
+  return defineTool(def, ctx);
 }
 
 interface ViewInput {
@@ -71,11 +93,12 @@ interface ViewInput {
 }
 
 export function sessionViewTool(ctx: PluginContext): ToolDefinition<ViewInput> {
-  return {
+  const def: ToolDefinition<ViewInput> = {
     name: "session_view",
     description:
       "Read messages from one of the owner's chat sessions, including ones from other projects. By default it shows the latest messages. Use `around` to center on a message number from session_search, or `from` to page forward. Reasoning and tool output are left out; tool calls show as one-line stubs.",
     minRole: "owner",
+    permission: "contextmanager:session.read",
     inputSchema: {
       type: "object",
       required: ["sessionId"],
@@ -91,11 +114,10 @@ export function sessionViewTool(ctx: PluginContext): ToolDefinition<ViewInput> {
       },
     },
     async invoke(input, call: ToolCall) {
-      if (call.role !== "owner") return fail(OWNER_ONLY);
       if (typeof input?.sessionId !== "string" || !input.sessionId)
         return fail("session_view needs a sessionId.");
       const session = ctx.store.sessions.get(input.sessionId);
-      if (!session) return fail(`No such session: ${input.sessionId}`);
+      if (!session || !mayRead(ctx, call, session.id)) return fail(`No such session: ${input.sessionId}`);
       return ok(
         viewSession(ctx, session, {
           sessionId: session.id,
@@ -107,4 +129,5 @@ export function sessionViewTool(ctx: PluginContext): ToolDefinition<ViewInput> {
       );
     },
   };
+  return defineTool(def, ctx);
 }

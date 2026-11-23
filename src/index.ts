@@ -1,4 +1,4 @@
-import { definePlugin, defineScope } from "@valethq/sdk";
+import { allowedTools, definePlugin, defineScope } from "@valethq/sdk";
 import { createContextManager } from "./context";
 import { viewImageTool } from "./image";
 import { registerNaming } from "./naming";
@@ -16,15 +16,19 @@ export default definePlugin<ContextConfig>({
     registerNaming(ctx);
     const index = createSearchIndex(ctx);
     ctx.scopes.provide("tools", {
-      list: ({ role }) =>
-        role === "owner" ? [viewImageTool(ctx), sessionSearchTool(ctx, index), sessionViewTool(ctx)] : [],
+      list: (scope) =>
+        allowedTools(ctx, scope, [viewImageTool(ctx), sessionSearchTool(ctx, index), sessionViewTool(ctx)]),
     });
     ctx.scopes.provide(
       "tools",
       {
-        async list({ sessionId, role }) {
-          const any = (await loadSkills(ctx, sessionId, role)).length > 0;
-          return any ? [skillReadTool((call) => loadSkills(ctx, call.sessionId, call.role))] : [];
+        async list(scope) {
+          const any = (await loadSkills(ctx, scope.sessionId, scope.role)).length > 0;
+          return any
+            ? allowedTools(ctx, scope, [
+                skillReadTool(ctx, (call) => loadSkills(ctx, call.sessionId, call.role)),
+              ])
+            : [];
         },
       },
       { key: "skills" },

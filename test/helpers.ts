@@ -3,12 +3,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
+  Audience,
+  Caller,
   ContextManager,
   Message,
   ModelInfo,
   Part,
   PartData,
   PluginContext,
+  PolicyProvider,
   Project,
   Role,
   ScopeDefinition,
@@ -17,10 +20,53 @@ import type {
   ToolProvider,
   UtilityModel,
 } from "@valethq/sdk";
+import manifest from "../manifest.json";
 import plugin from "../src/index";
 import type { ContextConfig } from "../src/settings";
 
 const dirs: string[] = [];
+
+export const PRINCIPALS: Record<string, Role> = {
+  boss: "owner",
+  boss2: "owner",
+  pal: "trusted",
+  nobody: "guest",
+};
+
+export const caller = (principalId = "boss", audience?: Audience): Caller => ({
+  plugin: "valet-agent",
+  actor: { principalId, role: PRINCIPALS[principalId] ?? "guest", ...(audience && { audience }) },
+});
+
+/** A policy that hands every permission to trusted and owner subjects, like a broad `contextmanager:*` grant. */
+export const generousPolicy: PolicyProvider = {
+  check: (subject, permission) =>
+    subject.role === "guest"
+      ? { allow: false, by: "valet-policy", reason: `${permission} denied` }
+      : { allow: true },
+};
+
+/** A minimal ctx for tools built outside `boot`: ACL state plus whatever `store` pieces the tool uses. */
+export function aclCtx(store: Record<string, unknown> = {}, policy?: PolicyProvider): PluginContext {
+  return {
+    plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest },
+    acl: { permission: (name: string) => declaredPermissions()[name], credential: () => undefined },
+    scopes: { maybe: (scope: string) => (scope === "policy" ? policy : undefined) },
+    log: { debug() {}, info() {}, warn() {}, error() {} },
+    store: {
+      principals: {
+        get: (id: string) => (PRINCIPALS[id] ? { id, displayName: id, role: PRINCIPALS[id] } : undefined),
+      },
+      sessions: { get: () => undefined },
+      ...store,
+    },
+  } as unknown as PluginContext;
+}
+
+export const declaredPermissions = (): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(manifest.acl.permissions).map(([name, def]) => [`contextmanager:${name}`, def]),
+  );
 
 export async function workspace(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "valet-cm-"));
@@ -132,7 +178,9 @@ export interface Booted {
   /** Fires the plugin's `after` hooks for an event, like the kernel would. */
   fire(name: string, payload: unknown): Promise<void>;
   /** skill_read's provider (key "skills"): the tools a run in this session and role would get. */
-  skillTools(sessionId: string, role: Role): Promise<ToolDefinition[]>;
+  skillTools(sessionId: string, role: Role, who?: Caller): Promise<ToolDefinition[]>;
+  /** The keyless tools@1 provider's listing for a run with this role and caller. */
+  listTools(role: Role, who?: Caller, sessionId?: string): Promise<ToolDefinition[]>;
   /** What core does on a settings save: the new block replaces ctx.config. */
   setConfig(patch: Partial<ContextConfig>): void;
   /** A project's overrides, as core's project layer would give them to ctx.configFor. */
@@ -147,6 +195,9 @@ export function boot(
     inference?: Record<string, { utility?: UtilityModel }>;
     valetHome?: string;
     config?: ContextConfig;
+    policy?: PolicyProvider;
+    /** Run ids a tool or context call is stamped with, and the caller each resolves to. */
+    runCallers?: Record<string, Caller>;
   } = {},
 ): Booted {
   const warns: Booted["warns"] = [];
@@ -163,6 +214,7 @@ export function boot(
   const db = new Database(":memory:");
   const ctx = {
     plugin: { id: "valet-contextmanager", version: "0.1.0", dir: "", manifest: {} },
+    acl: { permission: (name: string) => declaredPermissions()[name], credential: () => undefined },
     get config() {
       return current;
     },
@@ -184,7 +236,8 @@ export function boot(
       get: () => {
         throw new Error("no scopes in test ctx");
       },
-      maybe: (scope: string, key?: string) => (scope === "inference" ? o.inference?.[key ?? ""] : undefined),
+      maybe: (scope: string, key?: string) =>
+        scope === "inference" ? o.inference?.[key ?? ""] : scope === "policy" ? o.policy : undefined,
       all: () => [],
       watch: () => ({ dispose() {} }),
     },
@@ -195,6 +248,9 @@ export function boot(
       },
     },
     store: {
+      principals: {
+        get: (id: string) => (PRINCIPALS[id] ? { id, displayName: id, role: PRINCIPALS[id] } : undefined),
+      },
       sessions: {
         get: (id: string) => sessions.get(id),
         list: () => [...sessions.values()],
@@ -212,6 +268,13 @@ export function boot(
         },
       },
       projects: { get: (id: string) => projects.get(id) },
+      runs: {
+        caller: (runId: string) => {
+          const who = o.runCallers?.[runId];
+          if (!who) throw new Error(`unknown run "${runId}"`);
+          return who;
+        },
+      },
       messages: {
         list: (sessionId: string, q: { beforeSeq?: number; limit?: number } = {}) => {
           const all = (messages[sessionId] ?? []).filter(
@@ -283,10 +346,17 @@ export function boot(
     await new Promise((r) => setTimeout(r, 0));
   };
   const toolProvider = provided.find((p) => p.scope === "tools" && p.key === undefined)?.impl as ToolProvider;
-  const tools = toolProvider.list({ sessionId: "s", projectId: "p", role: "owner" }) as ToolDefinition[];
+  const listTools = async (role: Role, who: Caller = caller(), sessionId = "s") =>
+    toolProvider.list({ sessionId, projectId: "p", role, caller: who });
+  const tools = toolProvider.list({
+    sessionId: "s",
+    projectId: "p",
+    role: "owner",
+    caller: caller(),
+  }) as ToolDefinition[];
   const skillProvider = provided.find((p) => p.scope === "tools" && p.key === "skills")?.impl as ToolProvider;
-  const skillTools = async (sessionId: string, role: Role) =>
-    skillProvider.list({ sessionId, projectId: "p", role });
+  const skillTools = async (sessionId: string, role: Role, who: Caller = caller()) =>
+    skillProvider.list({ sessionId, projectId: "p", role, caller: who });
   const setConfig = (patch: Partial<ContextConfig>) => {
     current = { ...current, ...patch };
   };
@@ -304,6 +374,7 @@ export function boot(
     tools,
     fire,
     skillTools,
+    listTools,
     setConfig,
     setProjectConfig,
   };

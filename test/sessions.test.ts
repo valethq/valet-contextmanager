@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Message, Part, ToolCall } from "@valethq/sdk";
-import { boot, cleanup, entry, project, session, text } from "./helpers";
+import { boot, caller, cleanup, entry, project, session, text } from "./helpers";
 
 afterAll(cleanup);
 
@@ -13,7 +13,7 @@ function setup(messages: Record<string, Entry[]>, titles: Record<string, string>
     const t = b.tools.find((x) => x.name === name);
     if (!t) throw new Error(`no tool ${name}`);
     return async (input: Record<string, unknown>, role = "owner") => {
-      const r = await t.invoke(input, { role, cwd: "/" } as unknown as ToolCall);
+      const r = await t.invoke(input, { role, cwd: "/", caller: caller() } as unknown as ToolCall);
       return { isError: r.isError, text: r.content.map((c) => (c.type === "text" ? c.text : "")).join("") };
     };
   };
@@ -177,8 +177,8 @@ describe("access", () => {
     expect((await search({ query: "secret" }, "guest")).isError).toBe(true);
     expect((await view({ sessionId: "s1" }, "trusted")).isError).toBe(true);
     const provider = provided.find((p) => p.scope === "tools")?.impl as {
-      list(s: { sessionId: string; projectId: string; role: string }): unknown[];
+      list(s: { sessionId: string; projectId: string; role: string; caller: unknown }): unknown[];
     };
-    expect(provider.list({ sessionId: "s1", projectId: "p1", role: "guest" })).toEqual([]);
+    expect(provider.list({ sessionId: "s1", projectId: "p1", role: "guest", caller: caller() })).toEqual([]);
   });
 });

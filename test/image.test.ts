@@ -1,9 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PluginContext, ToolCall } from "@valethq/sdk";
+import type { ToolCall } from "@valethq/sdk";
 import { viewImageTool } from "../src/image";
-import { cleanup, workspace } from "./helpers";
+import { aclCtx, caller, cleanup, workspace } from "./helpers";
 
 afterAll(cleanup);
 
@@ -14,17 +14,16 @@ const PNG = Uint8Array.from(
 
 function setup() {
   const puts: { size: number; meta: { mime?: string; name?: string } }[] = [];
-  const ctx = {
-    store: {
-      blobs: {
-        put: async (bytes: Uint8Array, meta: { mime?: string; name?: string }) => {
-          puts.push({ size: bytes.length, meta });
-          return { id: `b${puts.length}` };
-        },
+  const ctx = aclCtx({
+    blobs: {
+      put: async (bytes: Uint8Array, meta: { mime?: string; name?: string }) => {
+        puts.push({ size: bytes.length, meta });
+        return { id: `b${puts.length}` };
       },
     },
-  } as unknown as PluginContext;
-  const call = (cwd: string, role = "owner") => ({ cwd, role }) as unknown as ToolCall;
+  });
+  const call = (cwd: string, role = "owner", who = caller()) =>
+    ({ cwd, role, caller: who }) as unknown as ToolCall;
   return { tool: viewImageTool(ctx), puts, call };
 }
 
