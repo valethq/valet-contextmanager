@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { PluginContext, Role } from "@valethq/sdk";
 import { type Skill, discoverSkills, skillRoots, visibleTo } from "./skills";
 import { skillsEnabled } from "./settings";
@@ -7,6 +8,11 @@ export async function loadSkills(ctx: PluginContext, sessionId: string, role: Ro
   const session = ctx.store.sessions.get(sessionId);
   const project = session && ctx.store.projects.get(session.projectId);
   if (!project || !skillsEnabled(ctx, project.id)) return [];
-  const roots = skillRoots(project.workspaceDir, project.settings, ctx.paths.valetHome);
+  const roots = skillRoots(
+    project.workspaceDir,
+    project.settings,
+    ctx.paths.valetHome,
+    process.env.HOME || homedir(),
+  );
   return roots === null ? [] : visibleTo(await discoverSkills(roots, ctx.log), role);
 }

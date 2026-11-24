@@ -92,12 +92,13 @@ export async function discoverSkills(roots: SkillRoot[], log: Logger): Promise<S
 
 /**
  * The project's `settings.skills`: `enabled: false` turns skills off, `paths` replaces the default roots
- * (relative paths resolve against the workspace). Defaults: `<workspace>/skills`, then `<valetHome>/skills`.
+ * (relative paths resolve against the workspace). Defaults: `<workspace>/skills`, then `<valetHome>/skills`, then `~/.agents/skills`.
  */
 export function skillRoots(
   workspaceDir: string,
   settings: Record<string, unknown>,
   valetHome: string,
+  userHome: string,
 ): SkillRoot[] | null {
   const raw = settings.skills;
   const s = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -110,6 +111,7 @@ export function skillRoots(
   return [
     { dir: resolve(workspaceDir, "skills"), source: "project" },
     { dir: join(valetHome, "skills"), source: "global" },
+    { dir: join(userHome, ".agents", "skills"), source: "global" },
   ];
 }
 

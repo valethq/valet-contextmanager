@@ -98,6 +98,24 @@ describe("preamble", () => {
     expect(out.indexOf("## Skills")).toBeGreaterThan(out.indexOf("# Persona"));
   });
 
+  test("lists skills from ~/.agents/skills below the project and valet home", async () => {
+    const userHome = await workspace({
+      ".agents/skills/delta/SKILL.md": skill("delta", "Agents delta."),
+      ".agents/skills/alpha/SKILL.md": skill("alpha", "Agents alpha, shadowed."),
+    });
+    const saved = process.env.HOME;
+    process.env.HOME = userHome;
+    try {
+      const { b } = await setup({ "skills/alpha/SKILL.md": skill("alpha", "Project alpha.") });
+      const out = await b.impl.preamble({ sessionId: "s1", role: "owner" });
+      expect(out).toContain("- delta: Agents delta.");
+      expect(out).toContain("- alpha: Project alpha.");
+      expect(out).not.toContain("shadowed");
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+
   test("lists bodies nowhere, and the build system prompt carries the same section", async () => {
     const { b } = await setup({ "skills/alpha/SKILL.md": skill("alpha", "Does alpha.") });
     const out = await b.impl.preamble({ sessionId: "s1", role: "owner" });
